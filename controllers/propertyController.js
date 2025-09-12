@@ -5,10 +5,11 @@ const { sendPropertyListingEmail } = require("../services/emailService");
 
 exports.createProperty = async (req, res) => {
   console.log("--- createProperty called ---");
-  console.log("req.files:", req.files); // This should contain Cloudinary info
+  console.log("req.files:", req.files);
   console.log("req.body:", req.body);
 
   try {
+    // Check if user is an agent
     if (req.user.role !== "agent") {
       return res.status(403).json({
         success: false,
@@ -16,13 +17,40 @@ exports.createProperty = async (req, res) => {
       });
     }
 
+    // Find agent and check verification status
+    const agent = await Agent.findOne({ userId: req.user.id });
+
+    if (!agent) {
+      return res.status(403).json({
+        success: false,
+        error:
+          "Agent profile not found. Please complete your agent profile first.",
+      });
+    }
+
+    // Check if agent is verified
+    if (agent.verificationStatus !== "verified") {
+      return res.status(403).json({
+        success: false,
+        error:
+          "Your agent account is not verified yet. Please wait for verification to create listings.",
+      });
+    }
+
+    // Check subscription status
+    if (!agent.canListProperties()) {
+      return res.status(403).json({
+        success: false,
+        error:
+          "Your subscription has expired. Please subscribe to continue listing properties.",
+      });
+    }
+
     // 1. Extract Cloudinary URLs from req.files
     const imageUrls = [];
     if (req.files && req.files.length > 0) {
-      // Each file object contains Cloudinary information
       for (const file of req.files) {
-        // Cloudinary URL is available in file.path or file.url
-        imageUrls.push(file.path); // or file.url depending on the structure
+        imageUrls.push(file.path);
       }
     }
 
@@ -31,7 +59,7 @@ exports.createProperty = async (req, res) => {
     // 2. Process the property data
     const normalizedBody = {
       ...req.body,
-      images: imageUrls, // Use the Cloudinary URLs
+      images: imageUrls,
       type: req.body.type || req.body.propertyType,
     };
 
@@ -43,12 +71,12 @@ exports.createProperty = async (req, res) => {
     await property.save();
 
     // Optional: send email to agent
-    const agent = await User.findById(req.user.id);
+    const user = await User.findById(req.user.id);
     const agentProfile = await Agent.findOne({ userId: req.user.id });
 
-    if (agent && agentProfile) {
+    if (user && agentProfile) {
       await sendPropertyListingEmail(
-        { ...agent.toObject(), ...agentProfile.toObject() },
+        { ...user.toObject(), ...agentProfile.toObject() },
         property
       );
     }

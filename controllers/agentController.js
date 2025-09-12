@@ -72,11 +72,24 @@ exports.updateAgentProfile = async (req, res) => {
 // Add this function to your agentController
 exports.submitAgentApplication = async (req, res) => {
   try {
-    const { bio, address, whatsappNumber } = req.body;
+    const { bio, address, whatsappNumber, referralCode } = req.body;
 
     console.log("Request files:", req.files); // Debug log
     console.log("Request body:", req.body); // Debug log
+    let referredByAgent = null;
+    if (referralCode) {
+      referredByAgent = await Agent.findOne({
+        referralCode,
+        verificationStatus: "verified",
+      });
 
+      if (!referredByAgent) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid referral code",
+        });
+      }
+    }
     // Check if files were uploaded
     if (!req.files || !req.files.governmentId || !req.files.idPhoto) {
       return res.status(400).json({
@@ -138,6 +151,7 @@ exports.submitAgentApplication = async (req, res) => {
       governmentId: governmentIdUrl,
       idPhoto: idPhotoUrl,
       verificationStatus: "pending",
+      referredBy: referredByAgent ? referralCode : null,
     });
 
     // Update user role to agent
@@ -145,6 +159,11 @@ exports.submitAgentApplication = async (req, res) => {
       role: "agent",
       agentProfile: agent._id,
     });
+    if (referredByAgent) {
+      referredByAgent.freeListingWeeks += 1;
+      referredByAgent.totalReferrals += 1;
+      await referredByAgent.save();
+    }
 
     res.status(201).json({
       success: true,
@@ -174,6 +193,48 @@ exports.submitAgentApplication = async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message || "Internal server error",
+    });
+  }
+};
+exports.validateReferralCode = async (req, res) => {
+  try {
+    const { code } = req.query;
+
+    if (!code) {
+      console.log("Referral code missing in query");
+      return res.status(400).json({
+        success: false,
+        error: "Referral code is required",
+      });
+    }
+
+    // log the incoming code
+    console.log("Validating referral code:", code);
+
+    const agent = await Agent.findOne({
+      referralCode: code,
+      verificationStatus: "verified",
+    }).populate("userId", "name");
+
+    if (!agent) {
+      console.log("No verified agent found with this referralCode:", code);
+      return res.status(404).json({
+        success: false,
+        error: "Invalid referral code",
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        agentName: agent.userId?.name,
+      },
+    });
+  } catch (error) {
+    console.error("Error validating referral code:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
     });
   }
 };
