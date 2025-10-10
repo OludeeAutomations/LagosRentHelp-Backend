@@ -1,9 +1,9 @@
-const EmailJS = require("@emailjs/nodejs");
+const { init } = require('@emailjs/nodejs');
 
-// Initialize EmailJS with your credentials
-const emailjs = EmailJS.init({
+// Initialize once with your keys
+const emailjs = init({
   publicKey: process.env.EMAILJS_PUBLIC_KEY,
-  privateKey: process.env.EMAILJS_PRIVATE_KEY,
+  privateKey: process.env.EMAILJS_PRIVATE_KEY, // optional
 });
 
-module.exports = emailjs;
+module.exports = emailjs; 

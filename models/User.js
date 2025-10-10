@@ -58,6 +58,15 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    restricted : {
+      type : Boolean,
+      default : false
+    },
+    verification: {
+      token: { type: String, required: false },
+      expiresAt: { type: Date, required: false }
+    }
+
   },
   {
     timestamps: true,

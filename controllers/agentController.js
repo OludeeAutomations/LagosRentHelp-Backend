@@ -2,6 +2,10 @@ const Agent = require("../models/Agent");
 const User = require("../models/User");
 const Property = require("../models/Property");
 const { cloudinary } = require("../config/cloudinary");
+const FormData = require("form-data");
+const fs = require("fs");
+const kycService = require("../services/kycService.js")
+
 
 exports.getAgentProfile = async (req, res) => {
   try {
@@ -46,6 +50,32 @@ exports.getAgentProfile = async (req, res) => {
     });
   }
 };
+exports.getLoggedInAgentProfile = async (req, res) => {
+  try {
+    const agent = await Agent.findOne({ userId: req.user.id })
+      .populate("userId", "name email phone avatar role")
+      .lean();
+
+    if (!agent) {
+      return res.status(404).json({
+        success: false,
+        message: "Agent profile not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      data: agent,
+    });
+  } catch (error) {
+    console.error("Error fetching logged-in agent profile:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+};
+
 
 exports.updateAgentProfile = async (req, res) => {
   try {
@@ -70,19 +100,19 @@ exports.updateAgentProfile = async (req, res) => {
 // Add this function to your agentController
 
 // Add this function to your agentController
+
+
 exports.submitAgentApplication = async (req, res) => {
   try {
     const { bio, address, whatsappNumber, referralCode } = req.body;
 
-    console.log("Request files:", req.files); // Debug log
-    console.log("Request body:", req.body); // Debug log
+    // Check referral code
     let referredByAgent = null;
     if (referralCode) {
       referredByAgent = await Agent.findOne({
         referralCode,
         verificationStatus: "verified",
       });
-
       if (!referredByAgent) {
         return res.status(400).json({
           success: false,
@@ -90,8 +120,9 @@ exports.submitAgentApplication = async (req, res) => {
         });
       }
     }
-    // Check if files were uploaded
-    if (!req.files || !req.files.governmentId || !req.files.idPhoto) {
+
+    // Must have both files
+    if (!req.files.idPhoto) {
       return res.status(400).json({
         success: false,
         error: "Both government ID and ID photo are required",
@@ -107,22 +138,21 @@ exports.submitAgentApplication = async (req, res) => {
       });
     }
 
-    // Upload files to Cloudinary
+    // ✅ Step 2: Upload files to Cloudinary
     let governmentIdUrl = "";
     let idPhotoUrl = "";
 
     try {
-      // Upload government ID
-      const governmentIdResult = await cloudinary.uploader.upload(
-        req.files.governmentId[0].path,
-        {
-          folder: "lagos-rent-help/agents/documents",
-          resource_type: "auto",
-        }
-      );
-      governmentIdUrl = governmentIdResult.secure_url;
+      // Commented out verification for government ID
+      // const governmentIdResult = await cloudinary.uploader.upload(
+      //   req.files.governmentId[0].path,
+      //   {
+      //     folder: "lagos-rent-help/agents/documents",
+      //     resource_type: "auto",
+      //   }
+      // );
+      // governmentIdUrl = governmentIdResult.secure_url;
 
-      // Upload ID photo
       const idPhotoResult = await cloudinary.uploader.upload(
         req.files.idPhoto[0].path,
         {
@@ -142,28 +172,37 @@ exports.submitAgentApplication = async (req, res) => {
       });
     }
 
-    // Create agent profile
+    // ✅ Step 3: Save agent profile in DB
     const agent = await Agent.create({
       userId: req.user.id,
       bio,
       address,
       whatsappNumber,
-      governmentId: governmentIdUrl,
+      // governmentId: governmentIdUrl, // commented out
       idPhoto: idPhotoUrl,
       verificationStatus: "pending",
       referredBy: referredByAgent ? referralCode : null,
     });
 
-    // Update user role to agent
+    // Update user role
     await User.findByIdAndUpdate(req.user.id, {
       role: "agent",
       agentProfile: agent._id,
     });
+
+    // Reward referral
     if (referredByAgent) {
       referredByAgent.freeListingWeeks += 1;
       referredByAgent.totalReferrals += 1;
       await referredByAgent.save();
     }
+
+    // ✅ Step 4: Commented out government ID KYC verification
+    // try {
+    //   kycService.verifyWithDojah(req.files.governmentId[0].path, req.user.id);
+    // } catch (verifyError) {
+    //   console.error("Dojah verification error:", verifyError);
+    // }
 
     res.status(201).json({
       success: true,
@@ -173,29 +212,15 @@ exports.submitAgentApplication = async (req, res) => {
     });
   } catch (error) {
     console.error("Agent application error:", error);
-
-    // Clean up uploaded files if there was an error
-    if (req.files) {
-      const files = [
-        ...(req.files.governmentId || []),
-        ...(req.files.idPhoto || []),
-      ];
-      for (const file of files) {
-        try {
-          // Extract public_id from path or URL if needed
-          await cloudinary.uploader.destroy(file.filename);
-        } catch (cleanupError) {
-          console.error("Error cleaning up file:", cleanupError);
-        }
-      }
-    }
-
     res.status(500).json({
       success: false,
       error: error.message || "Internal server error",
     });
   }
 };
+
+
+
 exports.validateReferralCode = async (req, res) => {
   try {
     const { code } = req.query;

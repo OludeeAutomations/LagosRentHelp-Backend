@@ -46,7 +46,7 @@ exports.createProperty = async (req, res) => {
       });
     }
 
-    // 1. Extract Cloudinary URLs from req.files
+    // Extract Cloudinary URLs from req.files
     const imageUrls = [];
     if (req.files && req.files.length > 0) {
       for (const file of req.files) {
@@ -54,11 +54,21 @@ exports.createProperty = async (req, res) => {
       }
     }
 
-    console.log("Extracted image URLs:", imageUrls);
+    // Parse amenities if it comes as JSON string
+    let amenities = [];
+    if (req.body.amenities) {
+      try {
+        amenities = JSON.parse(req.body.amenities);
+      } catch (err) {
+        console.warn("Invalid amenities JSON:", err.message);
+        amenities = [];
+      }
+    }
 
-    // 2. Process the property data
+    // Normalize property data
     const normalizedBody = {
       ...req.body,
+      amenities, // ensure it's stored as array
       images: imageUrls,
       type: req.body.type || req.body.propertyType,
     };
@@ -70,7 +80,7 @@ exports.createProperty = async (req, res) => {
 
     await property.save();
 
-    // Optional: send email to agent
+    // Send email to agent
     const user = await User.findById(req.user.id);
     const agentProfile = await Agent.findOne({ userId: req.user.id });
 
@@ -87,6 +97,7 @@ exports.createProperty = async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 };
+
 exports.getProperties = async (req, res) => {
   try {
     const {
@@ -166,10 +177,8 @@ exports.getProperties = async (req, res) => {
 // GET single property
 exports.getPropertyById = async (req, res) => {
   try {
-    const property = await Property.findById(req.params.id).populate(
-      "agentId",
-      "name phone email avatar"
-    );
+    const property = await Property.findById(req.params.id)
+      .populate("agentId", "name phone email"); // basic user info
 
     if (!property) {
       return res.status(404).json({
@@ -178,12 +187,30 @@ exports.getPropertyById = async (req, res) => {
       });
     }
 
+    // increment views
     property.views += 1;
     await property.save();
 
+    // convert to plain JS object
+    const propertyObj = property.toObject();
+
+    // get agent details separately (from Agent model)
+    const agent = await Agent.findOne({ userId: property.agentId._id })
+      .select("idPhoto verificationStatus whatsappNumber");
+
+    // if found, merge into agentId object
+    if (agent) {
+      propertyObj.agentId = {
+        ...propertyObj.agentId,
+        idPhoto: agent.idPhoto,
+        verificationStatus: agent.verificationStatus,
+        whatsappNumber: agent.whatsappNumber,
+
+      };
+    }
     res.json({
       success: true,
-      data: property,
+      data: propertyObj,
     });
   } catch (error) {
     res.status(500).json({
@@ -192,3 +219,4 @@ exports.getPropertyById = async (req, res) => {
     });
   }
 };
+

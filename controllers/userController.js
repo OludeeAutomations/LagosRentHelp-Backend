@@ -1,19 +1,40 @@
 const User = require("../models/User");
+const Agent = require("../models/Agent")
+const Property = require("../models/Property")
+
 
 exports.getProfile = async (req, res) => {
   try {
+    // Find user (exclude password)
     const user = await User.findById(req.user.id).select("-password");
-    res.json({
+    var agent = null;
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found",
+      });
+    }
+
+
+    // ✅ If user is an agent, fetch the agent profile and include it
+    if (user.role === "agent") {
+      agent = await Agent.findOne({ userId: user._id }).lean();
+    }
+    res.status(200).json({
       success: true,
       data: user,
+      agentData:agent
     });
   } catch (error) {
+    console.error("Error fetching profile:", error);
     res.status(500).json({
       success: false,
       error: error.message,
     });
   }
 };
+
 
 exports.updateProfile = async (req, res) => {
   try {
@@ -35,16 +56,51 @@ exports.updateProfile = async (req, res) => {
     });
   }
 };
+exports.getFavoriteProperties = async (req, res) => {
+  try {
+    // Find the user by ID
+    const user = await User.findById(req.user.id).populate("favorites");
 
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found",
+      });
+    }
+
+    // Populate favorites with full property details
+    const favoriteProperties = await Property.find({
+      _id: { $in: user.favorites },
+    });
+
+    res.json({
+      success: true,
+      data: favoriteProperties,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+};
 exports.addToFavorites = async (req, res) => {
   try {
     const { propertyId } = req.body;
     const user = await User.findById(req.user.id);
 
-    if (!user.favorites.includes(propertyId)) {
+    // Check if already in favorites
+    const index = user.favorites.indexOf(propertyId);
+
+    if (index === -1) {
+      // Not in favorites → Add it
       user.favorites.push(propertyId);
-      await user.save();
+    } else {
+      // Already in favorites → Remove it
+      user.favorites.splice(index, 1);
     }
+
+    await user.save();
 
     res.json({
       success: true,
@@ -57,6 +113,7 @@ exports.addToFavorites = async (req, res) => {
     });
   }
 };
+
 
 exports.removeFromFavorites = async (req, res) => {
   try {
