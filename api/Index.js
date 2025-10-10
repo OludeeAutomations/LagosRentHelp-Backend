@@ -8,7 +8,7 @@ dotenv.config();
 const app = express();
 
 // Middleware
-app.use(cors());
+app.use(cors({ origin: "*" }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -35,6 +35,10 @@ console.log("✓ Notification routes loaded: /api/notifications");
 app.use("/api/reviews", require("../routes/reviews"));
 console.log("✓ Review routes loaded: /api/reviews");
 
+app.use("/api/webhook", require("../routes/webhook"));
+console.log("✓ Webhook routes loaded: /routes/webhook");
+
+
 console.log("All routes loaded successfully!");
 
 // Error handling middleware
@@ -43,6 +47,13 @@ app.use((err, req, res, next) => {
   res.status(500).json({
     success: false,
     error: "Internal server error",
+  });
+});
+
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: "Resource not found",
   });
 });
 
