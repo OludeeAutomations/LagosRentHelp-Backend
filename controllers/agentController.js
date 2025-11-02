@@ -7,6 +7,43 @@ const fs = require("fs");
 const kycService = require("../services/kycService.js")
 
 
+
+
+exports.getTopAgents = async (req, res) => {
+  try {
+    // You can pass ?limit=5 or ?limit=10 to control how many agents to fetch
+    const limit = parseInt(req.query.limit) || 5;
+
+    // Fetch only verified agents, sorted by rating, and limited by the query
+    const agents = await Agent.find({ verificationStatus: "verified" })
+      .sort({ rating: -1, totalReviews: -1 }) // highest rated + more reviews first
+      .limit(limit)
+      .populate("userId", "name email phone avatar") // show agent user info
+      .lean();
+
+    // Optionally compute average ratings from review array if you rely on reviews instead of `rating` field
+    // (uncomment if you don't store rating in DB)
+    // agents.forEach(agent => {
+    //   if (agent.reviews && agent.reviews.length > 0) {
+    //     const avg = agent.reviews.reduce((acc, r) => acc + r.rating, 0) / agent.reviews.length;
+    //     agent.rating = Math.round(avg * 10) / 10;
+    //   }
+    // });
+
+    res.json({
+      success: true,
+      count: agents.length,
+      data: agents,
+    });
+  } catch (error) {
+    console.error("Error fetching top agents:", error);
+    res.status(500).json({
+      success: false,
+      error: "Server error",
+    });
+  }
+};
+
 exports.getAgentProfile = async (req, res) => {
   try {
     // Find the agent and populate full user details

@@ -40,10 +40,6 @@ const propertySchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
-    isActive: {
-      type: Boolean,
-      default: true,
-    },
     coordinates: {
       lat: Number,
       lng: Number,

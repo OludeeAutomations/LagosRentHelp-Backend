@@ -165,9 +165,15 @@ agentSchema.pre("save", function (next) {
     this.verificationStatus === "verified" &&
     this.subscription.status === "pending_verification"
   ) {
+    // const now = new Date();
+    // const trialEnds = new Date(now);
+    // trialEnds.setDate(trialEnds.getDate() + 14); // 2 weeks from now
+
+
     const now = new Date();
     const trialEnds = new Date(now);
-    trialEnds.setDate(trialEnds.getDate() + 14); // 2 weeks from now
+    trialEnds.setMonth(trialEnds.getMonth() + 6);
+
 
     this.subscription = {
       status: "trial",
@@ -186,6 +192,30 @@ agentSchema.pre("save", function (next) {
   }
   next();
 });
+
+
+// Compute average rating & total reviews before saving
+agentSchema.pre("save", function (next) {
+  if (this.isModified("reviews")) {
+    const totalReviews = this.reviews.length;
+
+    if (totalReviews > 0) {
+      const avgRating =
+        this.reviews.reduce((sum, review) => sum + review.rating, 0) /
+        totalReviews;
+
+      this.totalReviews = totalReviews;
+      this.rating = Math.round(avgRating * 10) / 10; // round to 1 decimal
+    } else {
+      // If no reviews, reset stats
+      this.totalReviews = 0;
+      this.rating = 0;
+    }
+  }
+
+  next();
+});
+
 
 // Method to generate unique referral code
 agentSchema.methods.generateReferralCode = function () {
