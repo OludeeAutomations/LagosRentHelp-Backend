@@ -220,3 +220,46 @@ exports.getPropertyById = async (req, res) => {
   }
 };
 
+
+// Mark a property as inactive
+exports.deactivateProperty = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Find property by ID
+    const property = await Property.findById(id);
+
+    if (!property) {
+      return res.status(404).json({
+        success: false,
+        error: "Property not found",
+      });
+    }
+
+    // Ensure only the agent who created the property can deactivate it
+    if (property.agentId.toString() !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        error: "You are not authorized to deactivate this property",
+      });
+    }
+
+    // Mark property as inactive
+    property.isActive = false;
+    await property.save();
+
+    res.json({
+      success: true,
+      message: "Property has been marked as inactive",
+      data: property,
+    });
+  } catch (error) {
+    console.error("Deactivate Property Error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+};
+
+

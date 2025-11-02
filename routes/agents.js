@@ -4,7 +4,8 @@ const {
   updateAgentProfile,
   submitAgentApplication,
   validateReferralCode,
-  getLoggedInAgentProfile
+  getLoggedInAgentProfile,
+  getTopAgents
 } = require("../controllers/agentController");
 const auth = require("../middleware/auth");
 const upload = require("../middleware/upload");
@@ -18,6 +19,9 @@ const {
 } = require("../controllers/subscriptionController");
 
 const router = express.Router();
+
+router.get("/top", getTopAgents);
+
 
 router.get("/profile", auth,getLoggedInAgentProfile);
 router.get("/:id", getAgentProfile);
