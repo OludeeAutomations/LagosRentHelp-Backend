@@ -11,7 +11,7 @@ const app = express();
 // Middleware
 app.use(
   cors({
-    origin: ["https://lagosrenthelp.ng/"], // only allow your site
+    origin: ["https://lagosrenthelp.ng"], // only allow your site
     credentials: true, // if you’re using cookies or tokens
   })
 );
