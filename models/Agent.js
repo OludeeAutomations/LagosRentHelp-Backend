@@ -80,8 +80,8 @@ const agentSchema = new mongoose.Schema(
     // Verification & Identity
     verificationStatus: {
       type: String,
-      enum: ["not_verified", "pending", "verified", "rejected"],
-      default: "not_verified",
+      enum: ["not verified", "pending", "verified", "rejected"],
+      default: "not verified",
     },
     verificationIssue: {
       type: String,
@@ -237,9 +237,6 @@ const agentSchema = new mongoose.Schema(
   }
 );
 
-// === Indexes for Performance ===
-
-// === Virtual Fields ===
 agentSchema.virtual("age").get(function () {
   if (!this.dateOfBirth) return null;
   const today = new Date();
@@ -271,9 +268,6 @@ agentSchema.virtual("trialDaysLeft").get(function () {
   return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 });
 
-// === Hooks & methods ===
-
-// Generate referral code before saving
 agentSchema.pre("save", function (next) {
   // Generate referral code if not exists
   if (!this.referralCode) {

@@ -2,56 +2,53 @@ const Agent = require("../models/Agent");
 const User = require("../models/User");
 const Property = require("../models/Property");
 const { cloudinary } = require("../config/cloudinary");
-const FormData = require("form-data");
-const fs = require("fs");
-const axios = require("axios");
-const Verification = require("../models/Verification"); // ✅ Import the model
 
 exports.submitAgentApplication = async (req, res) => {
   try {
-    // Extract all fields from the enhanced form
     const {
-      // Personal Information
-
       gender,
       dateOfBirth,
-
-      // Address & Location
       residentialAddress,
       state,
       city,
       institutionName,
       campusCode,
-
-      // Professional Information
       bio,
       experience,
       motivation,
       hearAboutUs,
       preferredCommunication,
       socialMedia,
-
-      // Contact
       whatsappNumber,
-
       referralCode,
     } = req.body;
 
     console.log("Request body:", req.body);
     console.log("Request files:", req.files);
 
+    // ✅ SIMPLE FIX: Clean empty strings from FormData
+    const cleanData = (data) => {
+      const cleaned = {};
+      for (const [key, value] of Object.entries(data)) {
+        cleaned[key] = value === "" ? null : value;
+      }
+      return cleaned;
+    };
+
+    const cleanedBody = cleanData(req.body);
+
     // Validate required fields
     const requiredFields = {
-      gender,
-      dateOfBirth,
-      residentialAddress,
-      state,
-      city,
-      bio,
-      motivation,
-      hearAboutUs,
-      preferredCommunication,
-      whatsappNumber,
+      gender: cleanedBody.gender,
+      dateOfBirth: cleanedBody.dateOfBirth,
+      residentialAddress: cleanedBody.residentialAddress,
+      state: cleanedBody.state,
+      city: cleanedBody.city,
+      bio: cleanedBody.bio,
+      motivation: cleanedBody.motivation,
+      hearAboutUs: cleanedBody.hearAboutUs,
+      preferredCommunication: cleanedBody.preferredCommunication,
+      whatsappNumber: cleanedBody.whatsappNumber,
     };
 
     const missingFields = Object.entries(requiredFields)
@@ -65,7 +62,6 @@ exports.submitAgentApplication = async (req, res) => {
         missingFields,
       });
     }
-
     // Validate gender enum
     const validGenders = ["male", "female", "other"];
     if (!validGenders.includes(gender)) {
@@ -115,7 +111,12 @@ exports.submitAgentApplication = async (req, res) => {
         error: "Professional photo is required",
       });
     }
-
+    if (!req.files?.proofOfAddress) {
+      return res.status(400).json({
+        success: false,
+        error: "Proof of address photo is required",
+      });
+    }
     // Upload professional photo to Cloudinary
     let idPhotoUrl = "";
     try {
@@ -176,43 +177,47 @@ exports.submitAgentApplication = async (req, res) => {
     const referralCodeForAgent = generateReferralCode();
 
     // Create agent profile with enhanced data
-    const agent = await Agent.create({
+    const agentData = {
       userId: req.user.id,
+      fullName: req.user.name,
+      email: req.user.email,
+      phone: req.user.phone,
 
-      gender,
-      dateOfBirth: new Date(dateOfBirth),
+      gender: cleanedBody.gender,
+      dateOfBirth: new Date(cleanedBody.dateOfBirth),
+      residentialAddress: cleanedBody.residentialAddress,
+      state: cleanedBody.state,
+      city: cleanedBody.city,
+      institutionName: cleanedBody.institutionName || null,
+      campusCode: cleanedBody.campusCode || null,
+      bio: cleanedBody.bio,
+      experience: cleanedBody.experience || null,
+      motivation: cleanedBody.motivation,
+      hearAboutUs: cleanedBody.hearAboutUs,
+      preferredCommunication: cleanedBody.preferredCommunication,
+      socialMedia: cleanedBody.socialMedia || null,
+      whatsappNumber: cleanedBody.whatsappNumber,
 
-      // Address & Location
-      residentialAddress,
-      state,
-      city,
-      institutionName: institutionName || null,
-      campusCode: campusCode || null,
-      proofOfAddress: proofOfAddressUrl || null,
-
-      // Professional Information
-      bio,
-      experience: experience || null,
-      motivation,
-      hearAboutUs,
-      preferredCommunication,
-      socialMedia: socialMedia || null,
-
-      // Contact & Verification
-      whatsappNumber,
+      // Files
       idPhoto: idPhotoUrl,
-      verificationStatus: "not verified",
+      proofOfAddress: proofOfAddressUrl, // Can be null if not provided
 
-      // Referral System
-      referredBy: referredByAgent ? referralCode : null,
+      verificationStatus: "not verified",
+      referredBy: referredByAgent ? cleanedBody.referralCode : null,
       referralCode: referralCodeForAgent,
       freeListingWeeks: 0,
       totalReferrals: 0,
+    };
+
+    // ✅ Remove any undefined values to avoid schema issues
+    Object.keys(agentData).forEach((key) => {
+      if (agentData[key] === undefined) {
+        delete agentData[key];
+      }
     });
 
-    // Create comprehensive verification record
+    const agent = await Agent.create(agentData);
 
-    // Update user role to agent_pending and link agent profile
     await User.findByIdAndUpdate(req.user.id, {
       role: "agent",
       agentProfile: agent._id,
