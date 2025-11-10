@@ -2,15 +2,22 @@ const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const dotenv = require("dotenv");
+const cookieParser = require("cookie-parser");
 
 dotenv.config();
 
 const app = express();
 
 // Middleware
-app.use(cors({ origin: "*" }));
+app.use(
+  cors({
+    origin: ["http://localhost:5173"], // only allow your site
+    credentials: true, // if you’re using cookies or tokens
+  })
+);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
 
 // Routes with console.log to show which routes are being loaded
 console.log("Loading routes...");
@@ -35,9 +42,8 @@ console.log("✓ Notification routes loaded: /api/notifications");
 app.use("/api/reviews", require("../routes/reviews"));
 console.log("✓ Review routes loaded: /api/reviews");
 
-app.use("/api/webhook", require("../routes/webhook"));
-console.log("✓ Webhook routes loaded: /routes/webhook");
-
+app.use("/api/verification", require("../routes/verification"));
+console.log("✓ verification routes loaded: /routes/verification");
 
 console.log("All routes loaded successfully!");
 
@@ -63,7 +69,7 @@ console.log(`Starting server on port ${PORT}...`);
 console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
 
 mongoose
-  .connect(process.env.MONGODB_URI || "mongodb://localhost:27017/realestate")
+  .connect(process.env.MONGODB_URI)
   .then(() => {
     console.log("✅ Connected to MongoDB successfully");
     app.listen(PORT, () => {

@@ -10,35 +10,97 @@ const agentSchema = new mongoose.Schema(
       unique: true,
     },
 
-    bio: String,
-
-    verificationStatus: {
+    gender: {
       type: String,
-      enum: ["pending", "verified", "rejected"],
-      default: "pending",
+      enum: ["male", "female", "other"],
+      required: true,
     },
-
-    governmentId: String,
-
-    address: {
+    dateOfBirth: {
+      type: Date,
+      required: true,
+    },
+    idPhoto: {
+      type: String, // Cloudinary URL
+      required: true,
+    },
+    // Address & Location Details
+    residentialAddress: {
       type: String,
       required: true,
     },
+    state: {
+      type: String,
+      required: true,
+    },
+    city: {
+      type: String,
+      required: true,
+    },
+    institutionName: {
+      type: String,
+      default: null,
+    },
+    campusCode: {
+      type: String,
+      default: null,
+    },
+    proofOfAddress: {
+      type: String, // Cloudinary URL
+      default: null,
+      required: true,
+    },
 
-    idPhoto: String,
+    // Professional Information
+    bio: {
+      type: String,
+      required: true,
+    },
+    experience: {
+      type: String,
+      default: null,
+    },
+    motivation: {
+      type: String,
+      required: true,
+    },
+    hearAboutUs: {
+      type: String,
+      required: true,
+    },
+    preferredCommunication: {
+      type: String,
+      enum: ["whatsapp", "email", "phone"],
+      required: true,
+    },
+    socialMedia: {
+      type: String,
+      default: null,
+    },
 
+    // Verification & Identity
+    verificationStatus: {
+      type: String,
+      enum: ["not_verified", "pending", "verified", "rejected"],
+      default: "not_verified",
+    },
+    verificationIssue: {
+      type: String,
+      default: null,
+    },
+
+    // Contact Information
     whatsappNumber: {
       type: String,
       required: true,
     },
 
+    // Property Management
     listings: [
       {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Property",
       },
     ],
-
     freeListingsUsed: {
       type: Number,
       default: 0,
@@ -78,8 +140,8 @@ const agentSchema = new mongoose.Schema(
             "active",
             "expired",
             "cancelled",
-          ], // Added pending_verification
-          default: "pending_verification", // Changed default
+          ],
+          default: "pending_verification",
         },
         trialStartsAt: Date,
         trialEndsAt: Date,
@@ -102,7 +164,7 @@ const agentSchema = new mongoose.Schema(
     },
     subscriptionExpiry: Date,
 
-    // Metrics
+    // Performance Metrics
     totalLeads: {
       type: Number,
       default: 0,
@@ -119,8 +181,23 @@ const agentSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
-    responseTime: Number,
- reviews: [
+    responseTime: {
+      type: Number,
+      default: 0,
+    },
+
+    // Verification Data (for Dojah/third-party verification)
+    verificationData: {
+      dojahResponse: mongoose.Schema.Types.Mixed,
+      submittedAt: Date,
+      verifiedAt: Date,
+      status: String,
+      confidenceValue: Number,
+      match: Boolean,
+    },
+
+    // Reviews
+    reviews: [
       {
         reviewerId: {
           type: mongoose.Schema.Types.ObjectId,
@@ -143,12 +220,56 @@ const agentSchema = new mongoose.Schema(
         },
       },
     ],
-   
+
+    // Additional Fields for Analytics
+
+    // Settings & Preferences
+    notifications: {
+      email: { type: Boolean, default: true },
+      sms: { type: Boolean, default: true },
+      push: { type: Boolean, default: true },
+      leadAlerts: { type: Boolean, default: true },
+      messageAlerts: { type: Boolean, default: true },
+    },
   },
   {
     timestamps: true,
   }
 );
+
+// === Indexes for Performance ===
+
+// === Virtual Fields ===
+agentSchema.virtual("age").get(function () {
+  if (!this.dateOfBirth) return null;
+  const today = new Date();
+  const birthDate = new Date(this.dateOfBirth);
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const monthDiff = today.getMonth() - birthDate.getMonth();
+
+  if (
+    monthDiff < 0 ||
+    (monthDiff === 0 && today.getDate() < birthDate.getDate())
+  ) {
+    age--;
+  }
+  return age;
+});
+
+agentSchema.virtual("isTrialActive").get(function () {
+  if (this.subscription.status !== "trial" || !this.subscription.trialEndsAt) {
+    return false;
+  }
+  return new Date() <= new Date(this.subscription.trialEndsAt);
+});
+
+agentSchema.virtual("trialDaysLeft").get(function () {
+  if (!this.isTrialActive) return 0;
+  const today = new Date();
+  const trialEnd = new Date(this.subscription.trialEndsAt);
+  const diffTime = trialEnd - today;
+  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+});
 
 // === Hooks & methods ===
 
@@ -159,21 +280,20 @@ agentSchema.pre("save", function (next) {
     this.referralCode = this.generateReferralCode();
   }
 
+  // Update lastActive timestamp
+  if (this.isModified()) {
+    this.lastActive = new Date();
+  }
+
   // Start trial when agent gets verified
   if (
     this.isModified("verificationStatus") &&
     this.verificationStatus === "verified" &&
     this.subscription.status === "pending_verification"
   ) {
-    // const now = new Date();
-    // const trialEnds = new Date(now);
-    // trialEnds.setDate(trialEnds.getDate() + 14); // 2 weeks from now
-
-
     const now = new Date();
     const trialEnds = new Date(now);
-    trialEnds.setMonth(trialEnds.getMonth() + 6);
-
+    trialEnds.setMonth(trialEnds.getMonth() + 6); // 6 months trial
 
     this.subscription = {
       status: "trial",
@@ -192,7 +312,6 @@ agentSchema.pre("save", function (next) {
   }
   next();
 });
-
 
 // Compute average rating & total reviews before saving
 agentSchema.pre("save", function (next) {
@@ -215,7 +334,6 @@ agentSchema.pre("save", function (next) {
 
   next();
 });
-
 
 // Method to generate unique referral code
 agentSchema.methods.generateReferralCode = function () {
@@ -262,6 +380,65 @@ agentSchema.methods.canListProperties = function () {
   }
 
   return false;
+};
+
+// Method to get agent's location information
+agentSchema.methods.getLocationInfo = function () {
+  return {
+    state: this.state,
+    city: this.city,
+    institution: this.institutionName,
+    campusCode: this.campusCode,
+    fullAddress: this.residentialAddress,
+  };
+};
+
+// Method to update response metrics
+agentSchema.methods.updateResponseMetrics = function (responseTime) {
+  this.responseTime = responseTime;
+
+  // Calculate response rate (simplified - you might want more complex logic)
+  if (this.totalLeads > 0) {
+    this.responseRate = Math.min(
+      100,
+      (this.totalLeads / (this.totalLeads + 1)) * 100
+    );
+  }
+
+  return this.save();
+};
+
+// Method to add a review
+agentSchema.methods.addReview = function (reviewerId, rating, comment) {
+  this.reviews.push({
+    reviewerId,
+    rating,
+    comment,
+    createdAt: new Date(),
+  });
+
+  return this.save();
+};
+
+// Static method to find agents by location
+agentSchema.statics.findByLocation = function (state, city) {
+  return this.find({
+    state: new RegExp(state, "i"),
+    city: new RegExp(city, "i"),
+    verificationStatus: "verified",
+    isActive: true,
+  }).sort({ rating: -1, totalReviews: -1 });
+};
+
+// Static method to get top performing agents
+agentSchema.statics.getTopAgents = function (limit = 10) {
+  return this.find({
+    verificationStatus: "verified",
+    isActive: true,
+    totalReviews: { $gte: 5 }, // Only agents with at least 5 reviews
+  })
+    .sort({ rating: -1, totalReviews: -1 })
+    .limit(limit);
 };
 
 module.exports = mongoose.model("Agent", agentSchema);
