@@ -115,7 +115,12 @@ exports.submitAgentApplication = async (req, res) => {
         error: "Professional photo is required",
       });
     }
-
+if (!req.files?.proofOfAddress) {
+  return res.status(400).json({
+    success: false,
+    error: "Proof of address photo is required",
+  });
+}
     // Upload professional photo to Cloudinary
     let idPhotoUrl = "";
     try {
