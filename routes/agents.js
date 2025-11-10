@@ -5,7 +5,7 @@ const {
   submitAgentApplication,
   validateReferralCode,
   getLoggedInAgentProfile,
-  getTopAgents
+  getTopAgents,
 } = require("../controllers/agentController");
 const auth = require("../middleware/auth");
 const upload = require("../middleware/upload");
@@ -22,16 +22,15 @@ const router = express.Router();
 
 router.get("/top", getTopAgents);
 
-
-router.get("/profile", auth,getLoggedInAgentProfile);
+router.get("/profile", auth, getLoggedInAgentProfile);
 router.get("/:id", getAgentProfile);
 router.put("/profile", auth, updateAgentProfile);
 router.post(
   "/apply",
   auth,
   upload.fields([
-    // { name: "governmentId", maxCount: 1 },
     { name: "idPhoto", maxCount: 1 },
+    { name: "proofOfAddress", maxCount: 1 },
   ]),
   submitAgentApplication
 );

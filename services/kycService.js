@@ -1,198 +1,125 @@
 const axios = require("axios");
-const FormData = require("form-data");
-const User = require("../models/User");
-const Agent = require("../models/Agent");
+const dojahConfig = require("../config/dojahConfig");
 
-
-
-const { sendKycResponse} = require("../services/emailService");
-
-
-async function verifyWithDidIt(frontImageUrl, userId) {
-  try {
-    // 1. Fetch user and agent
-    const user = await User.findById(userId);
-    const agent = await Agent.findOne({ userId });
-
-    if (!user) throw new Error("User not found");
-    if (!agent) throw new Error("Agent not found");
-
-    // 2. Download file from Cloudinary
-    const imageResponse = await axios.get(frontImageUrl, {
-      responseType: "arraybuffer",
+class DojahService {
+  constructor() {
+    this.client = axios.create({
+      baseURL: dojahConfig.baseURL,
+      headers: {
+        AppId: dojahConfig.appId,
+        Authorization: dojahConfig.apiKey,
+        "Content-Type": "application/json",
+      },
     });
-
-    // 3. Build FormData for DidIt
-    const formData = new FormData();
-    formData.append("vendor_data", userId);
-    formData.append("front_image", Buffer.from(imageResponse.data), {
-      filename: "id.png",
-      contentType: "image/png",
-    });
-
-    // 4. Call DidIt API
-    const response = await axios.post(
-      `${process.env.DIDIT_BASE_URL}/id-verification/`,
-      formData,
-      {
-        headers: {
-          ...formData.getHeaders(),
-          "x-api-key": process.env.DIDIT_API_KEY,
-        },
-      }
-    );
-
-    const result = response.data;
-
-    // 5. Check verification result
-    const status = result?.status || result?.data?.status;
-    let verificationPassed = false;
-
-    // DidIt might return "success" or "verified" or true (normalize it)
-    if (
-      status === "success" ||
-      status === "verified" ||
-      status === true ||
-      result?.verified === true
-    ) {
-      verificationPassed = true;
-    }
-
-    // 6. Update agent + send KYC email
-    if (!verificationPassed) {
-      agent.verificationStatus = "rejected";
-      await agent.save();
-      await sendKycResponse(
-        {
-          id: user._id,
-          name: user.name,
-          email: user.email,
-          phone: user.phone,
-          role: user.role,
-        },
-        "failed"
-      );
-    } else {
-      agent.verificationStatus = "verified";
-      await agent.save();
-      await sendKycResponse(
-        {
-          id: user._id,
-          name: user.name,
-          email: user.email,
-          phone: user.phone,
-          role: user.role,
-        },
-        "success"
-      );
-    }
-
-    return result;
-  } catch (error) {
-    console.error("DidIt API Error:", error.response?.data || error.message);
-    throw error;
   }
-}
 
-async function verifyWithDojah(frontImageUrl, userId) {
-  function mapTextData(textData) {
-    const mapped = {};
-    if (Array.isArray(textData)) {
-      textData.forEach((field) => {
-        mapped[field.field_key] = field.value;
+  async verifyNIN(nin, selfieImage) {
+    try {
+      const response = await this.client.post("/api/v1/kyc/nin/verify", {
+        nin: nin,
+        selfie_image: selfieImage,
       });
+
+      return {
+        success: true,
+        data: response.data,
+        message: "NIN verification completed successfully",
+      };
+    } catch (error) {
+      console.error(
+        "Dojah NIN verification error:",
+        error.response?.data || error.message
+      );
+      return {
+        success: false,
+        error: error.response?.data || error.message,
+        message: "NIN verification failed",
+      };
     }
-    return mapped;
   }
 
-  try {
-    const user = await User.findById(userId);
-    const agent = await Agent.findOne({ userId: userId });
+  async verifyBVN(bvn, selfieImage) {
+    try {
+      const response = await this.client.post("/api/v1/kyc/bvn/verify", {
+        bvn: bvn,
+        selfie_image: selfieImage,
+      });
 
-    if (!user) {
-      console.error("User not found");
-      throw new Error("User not found");
-    }
-
-    if (!agent) {
-      console.error("Agent not found");
-      throw new Error("Agent not found");
-    }
-
-    const payload = {
-      input_type: "url",
-      imagefrontside: frontImageUrl,
-    };
-
-    const response = await axios.post(
-      `${process.env.DOJAH_BASE_URL}/api/v1/document/analysis`,
-      payload,
-      {
-        headers: {
-          Authorization: process.env.DOJAH_SECRET_KEY,
-          AppId: process.env.DOJAH_APP_ID,
-          "Content-Type": "application/json",
-        },
-      }
-    );
-
-    const result = response.data;
-    const overallStatus = result?.entity?.status?.overall_status;
-
-    const extracted = mapTextData(result?.entity?.text_data);
-
-    const extractedFirstName = extracted.first_name || "";
-    const extractedLastName = extracted.last_name || "";
-
-    let isUserMatch = true;
-
-    if (user.name) {
-      const fullName = `${extractedFirstName} ${extractedLastName}`.trim().toLowerCase();
-      if (!fullName.includes(user.name.toLowerCase())) {
-        isUserMatch = false;
-      }
-    }
-
-
-    if (overallStatus === 0 || !isUserMatch) {
-      agent.verificationStatus = "rejected";
-      await agent.save();
-
-      await sendKycResponse(
-        {
-          id: user._id,
-          name: user.name,
-          email: user.email,
-          phone: user.phone,
-          role: user.role,
-        },
-        "failed"
+      return {
+        success: true,
+        data: response.data,
+        message: "BVN verification completed successfully",
+      };
+    } catch (error) {
+      console.error(
+        "Dojah BVN verification error:",
+        error.response?.data || error.message
       );
-    } else {
-      agent.verificationStatus = "verified";
-      await agent.save();
-
-      await sendKycResponse(
-        {
-          id: user._id,
-          name: user.name,
-          email: user.email,
-          phone: user.phone,
-          role: user.role,
-        },
-        "success"
-      );
+      return {
+        success: false,
+        error: error.response?.data || error.message,
+        message: "BVN verification failed",
+      };
     }
+  }
 
-    return result;
-  } catch (error) {
-    console.error("Dojah API Error:", error.response?.data || error.message);
-    throw error;
+  async verifyDriversLicense(id, fullName, dateOfBirth) {
+    try {
+      const response = await this.client.get("/api/v1/gh/kyc/dl", {
+        params: {
+          id: id,
+          full_name: fullName,
+          date_of_birth: dateOfBirth,
+        },
+      });
+
+      return {
+        success: true,
+        data: response.data,
+        message: "Driver's License verification completed successfully",
+      };
+    } catch (error) {
+      console.error(
+        "Dojah Driver's License verification error:",
+        error.response?.data || error.message
+      );
+      return {
+        success: false,
+        error: error.response?.data || error.message,
+        message: "Driver's License verification failed",
+      };
+    }
+  }
+
+  async verifyIdentity(
+    idType,
+    idNumber,
+    selfieImage = null,
+    additionalData = {}
+  ) {
+    switch (idType) {
+      case "nin":
+        return await this.verifyNIN(idNumber, selfieImage);
+
+      case "bvn":
+        return await this.verifyBVN(idNumber, selfieImage);
+
+      case "drivers_license":
+        return await this.verifyDriversLicense(
+          idNumber,
+          additionalData.fullName,
+          additionalData.dateOfBirth
+        );
+
+      default:
+        return {
+          success: false,
+          error: "Unsupported ID type",
+          message:
+            "Please select a valid ID type (NIN, BVN, or Driver's License)",
+        };
+    }
   }
 }
 
-
-module.exports = {
-    verifyWithDidIt,
-    verifyWithDojah
-}
+module.exports = new DojahService();
