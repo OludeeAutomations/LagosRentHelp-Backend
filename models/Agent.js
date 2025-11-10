@@ -80,8 +80,8 @@ const agentSchema = new mongoose.Schema(
     // Verification & Identity
     verificationStatus: {
       type: String,
-      enum: ["not_verified", "pending", "verified", "rejected"],
-      default: "not_verified",
+      enum: ["not verified", "pending", "verified", "rejected"],
+      default: "not verified",
     },
     verificationIssue: {
       type: String,
