@@ -4,7 +4,7 @@ const {
   updateProfile,
   addToFavorites,
   removeFromFavorites,
-   getFavoriteProperties
+  getFavoriteProperties,
 } = require("../controllers/userController");
 const auth = require("../middleware/auth");
 
