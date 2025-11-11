@@ -262,7 +262,7 @@ exports.login = async (req, res) => {
     return res.status(200).json({
       success: true,
       accessToken,
-      expiresIn: 7 * 24 * 60 * 60, // 7 days
+      expiresIn: 7 * 24 * 60 * 60,
       user: safeUser,
       ...(agentData && { agentData }),
     });

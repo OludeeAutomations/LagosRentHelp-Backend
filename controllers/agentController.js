@@ -25,6 +25,10 @@ exports.submitAgentApplication = async (req, res) => {
 
     console.log("Request body:", req.body);
     console.log("Request files:", req.files);
+    console.log("Referred by code:", referredBy);
+
+    // ✅ STEP 1: VALIDATE ALL DATA FIRST (BEFORE any database operations)
+    console.log("=== VALIDATING REQUEST DATA ===");
 
     // ✅ SIMPLE FIX: Clean empty strings from FormData
     const cleanData = (data) => {
@@ -52,10 +56,11 @@ exports.submitAgentApplication = async (req, res) => {
     };
 
     const missingFields = Object.entries(requiredFields)
-      .filter(([key, value]) => !value)
+      .filter(([key, value]) => !value || value.toString().trim() === "")
       .map(([key]) => key);
 
     if (missingFields.length > 0) {
+      console.log("❌ Validation failed - missing fields:", missingFields);
       return res.status(400).json({
         success: false,
         error: `Missing required fields: ${missingFields.join(", ")}`,
@@ -89,27 +94,40 @@ exports.submitAgentApplication = async (req, res) => {
       });
     }
 
-    // Check referral code
-    let referredByAgent = null;
-    if (referralCode) {
-      referredByAgent = await Agent.findOne({
-        referralCode,
-        verificationStatus: "verified",
-      });
-      if (!referredByAgent) {
-        return res.status(400).json({
-          success: false,
-          error: "Invalid referral code",
-        });
-      }
-    }
-
     // Must have ID photo
     if (!req.files?.idPhoto) {
       return res.status(400).json({
         success: false,
         error: "Professional photo is required",
       });
+    }
+
+    // ✅ STEP 2: CHECK REFERRAL CODE AND FIND REFERRING AGENT
+    let referredByAgent = null;
+    if (referredBy && referredBy.trim() !== "") {
+      console.log("🔄 Validating referral code:", referredBy);
+
+      referredByAgent = await Agent.findOne({
+        referralCode: referredBy.trim(),
+        verificationStatus: "verified", // Only verified agents can refer others
+      });
+
+      console.log("Found referring agent:", referredByAgent?._id);
+
+      if (!referredByAgent) {
+        console.log("❌ Invalid referral code or agent not verified");
+        return res.status(400).json({
+          success: false,
+          error: "Invalid referral code or referring agent is not verified",
+        });
+      }
+
+      console.log(
+        "✅ Valid referral code. Referring agent:",
+        referredByAgent._id
+      );
+    } else {
+      console.log("ℹ️ No referral code provided");
     }
     if (!req.files?.proofOfAddress) {
       return res.status(400).json({
@@ -142,7 +160,7 @@ exports.submitAgentApplication = async (req, res) => {
     }
 
     // Upload proof of address if provided
-    let proofOfAddressUrl = "";
+    let proofOfAddressUrl = null;
     if (req.files?.proofOfAddress) {
       try {
         console.log("Uploading proof of address to Cloudinary...");
@@ -160,18 +178,18 @@ exports.submitAgentApplication = async (req, res) => {
         );
       } catch (uploadError) {
         console.error("Proof of address upload error:", uploadError);
-        return res.status(400).json({
-          success: false,
-          error: `Failed to upload proof of address: ${uploadError.message}`,
-        });
+        // Don't fail the entire request if proof of address fails
+        console.log("Continuing without proof of address...");
       }
     }
 
-    // Generate unique referral code for the new agent
     const generateReferralCode = () => {
-      const prefix = "REF";
-      const randomNum = Math.floor(100000 + Math.random() * 900000);
-      return prefix + randomNum;
+      const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+      let result = "";
+      for (let i = 0; i < 8; i++) {
+        result += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      return `REF${result}`;
     };
 
     const referralCodeForAgent = generateReferralCode();
@@ -223,67 +241,107 @@ exports.submitAgentApplication = async (req, res) => {
       agentProfile: agent._id,
     });
 
-    // Reward referral if applicable
+    // ✅ STEP 5: REWARD REFERRAL IF APPLICABLE
     if (referredByAgent) {
+      console.log("🎁 Rewarding referring agent:", referredByAgent._id);
+
+      // Give the referring agent 1 free listing week
       referredByAgent.freeListingWeeks += 1;
+      console.log(
+        "referredByAgent.freeListingWeeks: ",
+        referredByAgent.freeListingWeeks
+      );
       referredByAgent.totalReferrals += 1;
-      await referredByAgent.save();
+      console.log(
+        "referredByAgent.totalReferrals: ",
+        referredByAgent.totalReferrals
+      );
+      console.log("referredByAgent: ", referredByAgent);
+      await Agent.findOneAndUpdate(
+        { referralCode: referredBy },
+        {
+          $inc: {
+            totalReferrals: 1,
+            freeListingWeeks: 1,
+          },
+        }
+      );
+      console.log(1);
 
       // Create referral record
-      await Referral.create({
-        referringAgent: referredByAgent._id,
-        newAgent: agent._id,
-        referralCode: referralCode,
-        rewardGiven: true,
-        rewardType: "free_listing_week",
-      });
+      // await Referral.create({
+      //   referringAgent: referredByAgent._id,
+      //   newAgent: agent._id,
+      //   referralCode: referredBy, // The code that was used
+      //   rewardGiven: true,
+      //   rewardType: "free_listing_week",
+      // });
+      console.log(2);
+
+      console.log(
+        "✅ Referral reward given successfully. Referring agent now has:",
+        referredByAgent.freeListingWeeks,
+        "free weeks"
+      );
     }
+    console.log(3);
 
     // Send welcome email to agent
     try {
+      console.log(4);
       await sendWelcomeEmail({
         id: req.user.id,
         name: req.user.name,
         email: req.user.email,
-        phone: phone,
-        role: "agent_pending",
+        phone: req.user.phone,
+        role: "agent",
       });
+      console.log(5);
     } catch (emailError) {
       console.error("Failed to send welcome email:", emailError);
     }
+    console.log(6);
 
     try {
+      console.log(7);
       await sendAdminNotification({
         type: "new_agent_application",
         agentName: req.user.name,
         agentEmail: req.user.email,
         agentLocation: `${city}, ${state}`,
         applicationDate: new Date(),
+        hasReferral: !!referredByAgent,
+        referringAgent: referredByAgent ? referredByAgent._id : null,
       });
+      console.log(8);
     } catch (notificationError) {
       console.error("Failed to send admin notification:", notificationError);
     }
+    console.log(9);
 
-    // ✅ Send comprehensive response
+    // ✅ STEP 6: FINAL SUCCESS RESPONSE
+    console.log("✅ Application submitted successfully");
     res.status(201).json({
       success: true,
       data: {
         agent: {
           _id: agent._id,
           verificationStatus: agent.verificationStatus,
-          referralCode: agent.referralCode,
+          referralCode: agent.referralCode, // This agent's new referral code
           createdAt: agent.createdAt,
         },
-
         referral: referredByAgent
           ? {
               rewarded: true,
               freeListingWeeks: 1,
+              referringAgentId: referredByAgent._id,
+              referringAgentName: referredByAgent.fullName,
             }
           : null,
       },
-      message:
-        "Agent application submitted successfully! Your profile is under review and you'll be notified within 24-48 hours.",
+      message: referredByAgent
+        ? "Agent application submitted successfully! Your referrer has been rewarded with 1 free listing week."
+        : "Agent application submitted successfully! Your profile is under review and you'll be notified within 24-48 hours.",
     });
   } catch (error) {
     console.error("Agent application error:", error);
@@ -313,7 +371,6 @@ exports.submitAgentApplication = async (req, res) => {
     });
   }
 };
-
 exports.getTopAgents = async (req, res) => {
   try {
     // You can pass ?limit=5 or ?limit=10 to control how many agents to fetch
