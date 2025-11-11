@@ -5,6 +5,7 @@ const { cloudinary } = require("../config/cloudinary");
 
 exports.submitAgentApplication = async (req, res) => {
   try {
+    // Extract all fields from the enhanced form
     const {
       gender,
       dateOfBirth,
@@ -20,39 +21,25 @@ exports.submitAgentApplication = async (req, res) => {
       preferredCommunication,
       socialMedia,
       whatsappNumber,
-      referralCode,
+      referredBy, // The referral code from the person who referred them
     } = req.body;
 
     console.log("Request body:", req.body);
     console.log("Request files:", req.files);
     console.log("Referred by code:", referredBy);
 
-    // ✅ STEP 1: VALIDATE ALL DATA FIRST (BEFORE any database operations)
-    console.log("=== VALIDATING REQUEST DATA ===");
 
-    // ✅ SIMPLE FIX: Clean empty strings from FormData
-    const cleanData = (data) => {
-      const cleaned = {};
-      for (const [key, value] of Object.entries(data)) {
-        cleaned[key] = value === "" ? null : value;
-      }
-      return cleaned;
-    };
-
-    const cleanedBody = cleanData(req.body);
-
-    // Validate required fields
     const requiredFields = {
-      gender: cleanedBody.gender,
-      dateOfBirth: cleanedBody.dateOfBirth,
-      residentialAddress: cleanedBody.residentialAddress,
-      state: cleanedBody.state,
-      city: cleanedBody.city,
-      bio: cleanedBody.bio,
-      motivation: cleanedBody.motivation,
-      hearAboutUs: cleanedBody.hearAboutUs,
-      preferredCommunication: cleanedBody.preferredCommunication,
-      whatsappNumber: cleanedBody.whatsappNumber,
+      gender,
+      dateOfBirth,
+      residentialAddress,
+      state,
+      city,
+      bio,
+      motivation,
+      hearAboutUs,
+      preferredCommunication,
+      whatsappNumber,
     };
 
     const missingFields = Object.entries(requiredFields)
@@ -67,7 +54,7 @@ exports.submitAgentApplication = async (req, res) => {
         missingFields,
       });
     }
-    // Validate gender enum
+
     const validGenders = ["male", "female", "other"];
     if (!validGenders.includes(gender)) {
       return res.status(400).json({
@@ -75,8 +62,6 @@ exports.submitAgentApplication = async (req, res) => {
         error: "Invalid gender value",
       });
     }
-
-    // Validate communication preference
     const validCommunication = ["whatsapp", "email", "phone"];
     if (!validCommunication.includes(preferredCommunication)) {
       return res.status(400).json({
@@ -85,7 +70,6 @@ exports.submitAgentApplication = async (req, res) => {
       });
     }
 
-    // Check if user already has an agent profile
     const existingAgent = await Agent.findOne({ userId: req.user.id });
     if (existingAgent) {
       return res.status(400).json({
@@ -94,7 +78,6 @@ exports.submitAgentApplication = async (req, res) => {
       });
     }
 
-    // Must have ID photo
     if (!req.files?.idPhoto) {
       return res.status(400).json({
         success: false,
@@ -129,13 +112,9 @@ exports.submitAgentApplication = async (req, res) => {
     } else {
       console.log("ℹ️ No referral code provided");
     }
-    if (!req.files?.proofOfAddress) {
-      return res.status(400).json({
-        success: false,
-        error: "Proof of address photo is required",
-      });
-    }
-    // Upload professional photo to Cloudinary
+
+    console.log("✅ All validations passed");
+
     let idPhotoUrl = "";
     try {
       console.log("Uploading professional photo to Cloudinary...");
@@ -159,7 +138,6 @@ exports.submitAgentApplication = async (req, res) => {
       });
     }
 
-    // Upload proof of address if provided
     let proofOfAddressUrl = null;
     if (req.files?.proofOfAddress) {
       try {
@@ -178,7 +156,6 @@ exports.submitAgentApplication = async (req, res) => {
         );
       } catch (uploadError) {
         console.error("Proof of address upload error:", uploadError);
-        // Don't fail the entire request if proof of address fails
         console.log("Continuing without proof of address...");
       }
     }
@@ -194,46 +171,40 @@ exports.submitAgentApplication = async (req, res) => {
 
     const referralCodeForAgent = generateReferralCode();
 
-    // Create agent profile with enhanced data
     const agentData = {
       userId: req.user.id,
       fullName: req.user.name,
       email: req.user.email,
       phone: req.user.phone,
 
-      gender: cleanedBody.gender,
-      dateOfBirth: new Date(cleanedBody.dateOfBirth),
-      residentialAddress: cleanedBody.residentialAddress,
-      state: cleanedBody.state,
-      city: cleanedBody.city,
-      institutionName: cleanedBody.institutionName || null,
-      campusCode: cleanedBody.campusCode || null,
-      bio: cleanedBody.bio,
-      experience: cleanedBody.experience || null,
-      motivation: cleanedBody.motivation,
-      hearAboutUs: cleanedBody.hearAboutUs,
-      preferredCommunication: cleanedBody.preferredCommunication,
-      socialMedia: cleanedBody.socialMedia || null,
-      whatsappNumber: cleanedBody.whatsappNumber,
+      gender,
+      dateOfBirth: new Date(dateOfBirth),
 
-      // Files
+      residentialAddress,
+      state,
+      city,
+      institutionName: institutionName || null,
+      campusCode: campusCode || null,
+      proofOfAddress: proofOfAddressUrl,
+
+      bio,
+      experience: experience || null,
+      motivation,
+      hearAboutUs,
+      preferredCommunication,
+      socialMedia: socialMedia || null,
+
+      whatsappNumber,
       idPhoto: idPhotoUrl,
-      proofOfAddress: proofOfAddressUrl, // Can be null if not provided
-
       verificationStatus: "not verified",
-      referredBy: referredByAgent ? cleanedBody.referralCode : null,
-      referralCode: referralCodeForAgent,
+
+      referredBy: referredBy || null, 
+      referralCode: referralCodeForAgent, 
       freeListingWeeks: 0,
       totalReferrals: 0,
     };
 
-    // ✅ Remove any undefined values to avoid schema issues
-    Object.keys(agentData).forEach((key) => {
-      if (agentData[key] === undefined) {
-        delete agentData[key];
-      }
-    });
-
+    console.log("✅ Saving to database...");
     const agent = await Agent.create(agentData);
 
     await User.findByIdAndUpdate(req.user.id, {
@@ -241,7 +212,6 @@ exports.submitAgentApplication = async (req, res) => {
       agentProfile: agent._id,
     });
 
-    // ✅ STEP 5: REWARD REFERRAL IF APPLICABLE
     if (referredByAgent) {
       console.log("🎁 Rewarding referring agent:", referredByAgent._id);
 
@@ -266,17 +236,8 @@ exports.submitAgentApplication = async (req, res) => {
           },
         }
       );
-      console.log(1);
 
-      // Create referral record
-      // await Referral.create({
-      //   referringAgent: referredByAgent._id,
-      //   newAgent: agent._id,
-      //   referralCode: referredBy, // The code that was used
-      //   rewardGiven: true,
-      //   rewardType: "free_listing_week",
-      // });
-      console.log(2);
+      
 
       console.log(
         "✅ Referral reward given successfully. Referring agent now has:",
@@ -284,9 +245,7 @@ exports.submitAgentApplication = async (req, res) => {
         "free weeks"
       );
     }
-    console.log(3);
 
-    // Send welcome email to agent
     try {
       console.log(4);
       await sendWelcomeEmail({
@@ -300,10 +259,8 @@ exports.submitAgentApplication = async (req, res) => {
     } catch (emailError) {
       console.error("Failed to send welcome email:", emailError);
     }
-    console.log(6);
 
     try {
-      console.log(7);
       await sendAdminNotification({
         type: "new_agent_application",
         agentName: req.user.name,
@@ -317,9 +274,7 @@ exports.submitAgentApplication = async (req, res) => {
     } catch (notificationError) {
       console.error("Failed to send admin notification:", notificationError);
     }
-    console.log(9);
 
-    // ✅ STEP 6: FINAL SUCCESS RESPONSE
     console.log("✅ Application submitted successfully");
     res.status(201).json({
       success: true,
