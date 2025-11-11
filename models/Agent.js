@@ -47,7 +47,7 @@ const agentSchema = new mongoose.Schema(
     proofOfAddress: {
       type: String, // Cloudinary URL
       default: null,
-      required: true,
+      required: false,
     },
 
     // Professional Information
@@ -185,7 +185,10 @@ const agentSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
-
+    lastActive: {
+      type: Date,
+      default: Date.now,
+    },
     // Verification Data (for Dojah/third-party verification)
     verificationData: {
       dojahResponse: mongoose.Schema.Types.Mixed,
@@ -268,76 +271,63 @@ agentSchema.virtual("trialDaysLeft").get(function () {
   return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 });
 
-agentSchema.pre("save", function (next) {
-  // Generate referral code if not exists
-  if (!this.referralCode) {
-    this.referralCode = this.generateReferralCode();
-  }
-
-  // Update lastActive timestamp
-  if (this.isModified()) {
-    this.lastActive = new Date();
-  }
-
-  // Start trial when agent gets verified
-  if (
-    this.isModified("verificationStatus") &&
-    this.verificationStatus === "verified" &&
-    this.subscription.status === "pending_verification"
-  ) {
-    const now = new Date();
-    const trialEnds = new Date(now);
-    trialEnds.setMonth(trialEnds.getMonth() + 6); // 6 months trial
-
-    this.subscription = {
-      status: "trial",
-      trialStartsAt: now,
-      trialEndsAt: trialEnds,
-      plan: "trial",
-      stripeCustomerId: this.subscription.stripeCustomerId,
-      stripeSubscriptionId: this.subscription.stripeSubscriptionId,
-    };
-
-    console.log(
-      `Started free trial for agent ${
-        this._id
-      } until ${trialEnds.toLocaleDateString()}`
-    );
-  }
-  next();
-});
-
-// Compute average rating & total reviews before saving
-agentSchema.pre("save", function (next) {
-  if (this.isModified("reviews")) {
-    const totalReviews = this.reviews.length;
-
-    if (totalReviews > 0) {
-      const avgRating =
-        this.reviews.reduce((sum, review) => sum + review.rating, 0) /
-        totalReviews;
-
-      this.totalReviews = totalReviews;
-      this.rating = Math.round(avgRating * 10) / 10; // round to 1 decimal
-    } else {
-      // If no reviews, reset stats
-      this.totalReviews = 0;
-      this.rating = 0;
-    }
-  }
-
-  next();
-});
-
-// Method to generate unique referral code
-agentSchema.methods.generateReferralCode = function () {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  let result = "";
-  for (let i = 0; i < 8; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return `REF${result}`;
-};
+//agentSchema.pre("save", function (next) {
+//  // Update lastActive timestamp
+//  if (this.isModified()) {
+//    this.lastActive = new Date();
+//  }
+//
+//  // Start trial when agent gets verified
+//  if (
+//    this.isModified("verificationStatus") &&
+//    this.verificationStatus === "verified" &&
+//    this.subscription.status === "pending_verification"
+//  ) {
+//    const now = new Date();
+//    const trialEnds = new Date(now);
+//    trialEnds.setMonth(trialEnds.getMonth() + 6); // 6 months trial
+//
+//    this.subscription = {
+//      status: "trial",
+//      trialStartsAt: now,
+//      trialEndsAt: trialEnds,
+//      plan: "trial",
+//      stripeCustomerId: this.subscription.stripeCustomerId,
+//      stripeSubscriptionId: this.subscription.stripeSubscriptionId,
+//    };
+//
+//    console.log(
+//      `Started free trial for agent ${
+//        this._id
+//      } until ${trialEnds.toLocaleDateString()}`
+//    );
+//  }
+//  next();
+//});
+//
+//// Compute average rating & total reviews before saving
+//agentSchema.pre("save", function (next) {
+//  if (this.isModified("reviews")) {
+//    const totalReviews = this.reviews.length;
+//
+//    if (totalReviews > 0) {
+//      const avgRating =
+//        this.reviews.reduce((sum, review) => sum + review.rating, 0) /
+//        totalReviews;
+//
+//      this.totalReviews = totalReviews;
+//      this.rating = Math.round(avgRating * 10) / 10; // round to 1 decimal
+//    } else {
+//      // If no reviews, reset stats
+//      this.totalReviews = 0;
+//      this.rating = 0;
+//    }
+//  }
+//
+//  next();
+//});
+//
+//// Method to generate unique referral code
 
 // Method to check if agent can list properties
 agentSchema.methods.canListProperties = function () {
