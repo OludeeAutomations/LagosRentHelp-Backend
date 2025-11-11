@@ -2,14 +2,9 @@ const Agent = require("../models/Agent");
 const User = require("../models/User");
 const Property = require("../models/Property");
 const { cloudinary } = require("../config/cloudinary");
-const FormData = require("form-data");
-const fs = require("fs");
-const axios = require("axios");
-const Verification = require("../models/Verification"); // ✅ Import the model
 
 exports.submitAgentApplication = async (req, res) => {
   try {
-    // Extract all fields from the enhanced form
     const {
       gender,
       dateOfBirth,
@@ -25,7 +20,7 @@ exports.submitAgentApplication = async (req, res) => {
       preferredCommunication,
       socialMedia,
       whatsappNumber,
-      referredBy, // The referral code from the person who referred them
+      referralCode,
     } = req.body;
 
     console.log("Request body:", req.body);
@@ -35,18 +30,29 @@ exports.submitAgentApplication = async (req, res) => {
     // ✅ STEP 1: VALIDATE ALL DATA FIRST (BEFORE any database operations)
     console.log("=== VALIDATING REQUEST DATA ===");
 
+    // ✅ SIMPLE FIX: Clean empty strings from FormData
+    const cleanData = (data) => {
+      const cleaned = {};
+      for (const [key, value] of Object.entries(data)) {
+        cleaned[key] = value === "" ? null : value;
+      }
+      return cleaned;
+    };
+
+    const cleanedBody = cleanData(req.body);
+
     // Validate required fields
     const requiredFields = {
-      gender,
-      dateOfBirth,
-      residentialAddress,
-      state,
-      city,
-      bio,
-      motivation,
-      hearAboutUs,
-      preferredCommunication,
-      whatsappNumber,
+      gender: cleanedBody.gender,
+      dateOfBirth: cleanedBody.dateOfBirth,
+      residentialAddress: cleanedBody.residentialAddress,
+      state: cleanedBody.state,
+      city: cleanedBody.city,
+      bio: cleanedBody.bio,
+      motivation: cleanedBody.motivation,
+      hearAboutUs: cleanedBody.hearAboutUs,
+      preferredCommunication: cleanedBody.preferredCommunication,
+      whatsappNumber: cleanedBody.whatsappNumber,
     };
 
     const missingFields = Object.entries(requiredFields)
@@ -61,7 +67,6 @@ exports.submitAgentApplication = async (req, res) => {
         missingFields,
       });
     }
-
     // Validate gender enum
     const validGenders = ["male", "female", "other"];
     if (!validGenders.includes(gender)) {
@@ -124,10 +129,13 @@ exports.submitAgentApplication = async (req, res) => {
     } else {
       console.log("ℹ️ No referral code provided");
     }
-
-    console.log("✅ All validations passed");
-
-    // ✅ STEP 3: PROCESS FILES (still before database commit)
+    if (!req.files?.proofOfAddress) {
+      return res.status(400).json({
+        success: false,
+        error: "Proof of address photo is required",
+      });
+    }
+    // Upload professional photo to Cloudinary
     let idPhotoUrl = "";
     try {
       console.log("Uploading professional photo to Cloudinary...");
@@ -186,48 +194,48 @@ exports.submitAgentApplication = async (req, res) => {
 
     const referralCodeForAgent = generateReferralCode();
 
-    // ✅ STEP 4: CREATE AGENT PROFILE WITH ENHANCED DATA
+    // Create agent profile with enhanced data
     const agentData = {
       userId: req.user.id,
       fullName: req.user.name,
       email: req.user.email,
       phone: req.user.phone,
 
-      // Personal Information
-      gender,
-      dateOfBirth: new Date(dateOfBirth),
+      gender: cleanedBody.gender,
+      dateOfBirth: new Date(cleanedBody.dateOfBirth),
+      residentialAddress: cleanedBody.residentialAddress,
+      state: cleanedBody.state,
+      city: cleanedBody.city,
+      institutionName: cleanedBody.institutionName || null,
+      campusCode: cleanedBody.campusCode || null,
+      bio: cleanedBody.bio,
+      experience: cleanedBody.experience || null,
+      motivation: cleanedBody.motivation,
+      hearAboutUs: cleanedBody.hearAboutUs,
+      preferredCommunication: cleanedBody.preferredCommunication,
+      socialMedia: cleanedBody.socialMedia || null,
+      whatsappNumber: cleanedBody.whatsappNumber,
 
-      // Address & Location
-      residentialAddress,
-      state,
-      city,
-      institutionName: institutionName || null,
-      campusCode: campusCode || null,
-      proofOfAddress: proofOfAddressUrl,
-
-      // Professional Information
-      bio,
-      experience: experience || null,
-      motivation,
-      hearAboutUs,
-      preferredCommunication,
-      socialMedia: socialMedia || null,
-
-      // Contact & Verification
-      whatsappNumber,
+      // Files
       idPhoto: idPhotoUrl,
-      verificationStatus: "not verified",
+      proofOfAddress: proofOfAddressUrl, // Can be null if not provided
 
-      referredBy: referredBy || null, // Store the referral code that was used to refer this agent
-      referralCode: referralCodeForAgent, // This agent's own unique referral code
+      verificationStatus: "not verified",
+      referredBy: referredByAgent ? cleanedBody.referralCode : null,
+      referralCode: referralCodeForAgent,
       freeListingWeeks: 0,
       totalReferrals: 0,
     };
 
-    console.log("✅ Saving to database...");
+    // ✅ Remove any undefined values to avoid schema issues
+    Object.keys(agentData).forEach((key) => {
+      if (agentData[key] === undefined) {
+        delete agentData[key];
+      }
+    });
+
     const agent = await Agent.create(agentData);
 
-    // Update user role to agent and link agent profile
     await User.findByIdAndUpdate(req.user.id, {
       role: "agent",
       agentProfile: agent._id,
@@ -291,11 +299,9 @@ exports.submitAgentApplication = async (req, res) => {
       console.log(5);
     } catch (emailError) {
       console.error("Failed to send welcome email:", emailError);
-      // Don't fail the request if email fails
     }
     console.log(6);
 
-    // Send notification to admin about new agent application
     try {
       console.log(7);
       await sendAdminNotification({
