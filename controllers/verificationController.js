@@ -65,6 +65,37 @@ exports.submitVerification = async (req, res) => {
       });
     }
 
+    // ✅ NEW: Check if selfie verification actually passed
+    const selfieMatch =
+      verificationResult.data.entity?.selfie_verification?.match;
+
+    // For NIN and BVN, check selfie match
+    if ((idType === "nin" || idType === "bvn") && !selfieMatch) {
+      return res.status(400).json({
+        success: false,
+        error: "Selfie verification failed",
+        message: "Your selfie does not match the ID document photo",
+        confidence:
+          verificationResult.data.entity?.selfie_verification?.confidence_value,
+      });
+    }
+
+    // For driver's license, check if verification was successful
+    if (idType === "drivers_license") {
+      // Check driver's license specific success indicators
+      const dlVerified =
+        verificationResult.data.entity?.status === "verified" ||
+        verificationResult.data.entity?.valid === true;
+
+      if (!dlVerified) {
+        return res.status(400).json({
+          success: false,
+          error: "Driver's License verification failed",
+          message: "The provided driver's license could not be verified",
+        });
+      }
+    }
+
     const agentId = req.user.id;
     const agent = await Agent.findOne({ userId: agentId });
 
@@ -75,13 +106,20 @@ exports.submitVerification = async (req, res) => {
       });
     }
 
-    agent.verificationStatus = "pending";
+    // ✅ CHANGED: Update to "verified" instead of "pending"
+    agent.verificationStatus = "verified";
+    agent.isVerified = true; // Add this field if it doesn't exist
     agent.idType = idType;
     agent.idNumber = idNumber;
+    agent.verifiedAt = new Date(); // Add verification timestamp
+
     agent.verificationData = {
       dojahResponse: verificationResult.data,
       submittedAt: new Date(),
-      status: "submitted",
+      status: "verified", // ✅ CHANGED: "verified" not "submitted"
+      confidence:
+        verificationResult.data.entity?.selfie_verification?.confidence_value,
+      verifiedAt: new Date(),
     };
 
     if (idType === "drivers_license") {
@@ -91,16 +129,21 @@ exports.submitVerification = async (req, res) => {
 
     await agent.save();
 
+    // ✅ CHANGED: Return "verified" status and confidence
     return res.status(200).json({
       success: true,
-      message: "Verification submitted successfully",
+      message: "Identity verified successfully!", // ✅ Better message
       data: {
-        verificationId:
-          verificationResult.data.entity?.id ||
-          verificationResult.data.request_id,
-        status: "submitted",
+        verificationId: verificationResult.data.entity?.id,
+        status: "verified", // ✅ CHANGED: "verified" not "submitted"
         idType: idType,
         idNumberMasked: idNumber.replace(/(.{4})$/, "****"),
+        confidence:
+          verificationResult.data.entity?.selfie_verification?.confidence_value,
+        userDetails: {
+          firstName: verificationResult.data.entity?.first_name,
+          lastName: verificationResult.data.entity?.last_name,
+        },
       },
     });
   } catch (error) {
