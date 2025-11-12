@@ -2,10 +2,6 @@ const Agent = require("../models/Agent");
 const User = require("../models/User");
 const Property = require("../models/Property");
 const { cloudinary } = require("../config/cloudinary");
-const FormData = require("form-data");
-const fs = require("fs");
-const axios = require("axios");
-const Verification = require("../models/Verification"); // ✅ Import the model
 
 exports.submitAgentApplication = async (req, res) => {
   try {
@@ -32,10 +28,6 @@ exports.submitAgentApplication = async (req, res) => {
     console.log("Request files:", req.files);
     console.log("Referred by code:", referredBy);
 
-    // ✅ STEP 1: VALIDATE ALL DATA FIRST (BEFORE any database operations)
-    console.log("=== VALIDATING REQUEST DATA ===");
-
-    // Validate required fields
     const requiredFields = {
       gender,
       dateOfBirth,
@@ -62,7 +54,6 @@ exports.submitAgentApplication = async (req, res) => {
       });
     }
 
-    // Validate gender enum
     const validGenders = ["male", "female", "other"];
     if (!validGenders.includes(gender)) {
       return res.status(400).json({
@@ -70,8 +61,6 @@ exports.submitAgentApplication = async (req, res) => {
         error: "Invalid gender value",
       });
     }
-
-    // Validate communication preference
     const validCommunication = ["whatsapp", "email", "phone"];
     if (!validCommunication.includes(preferredCommunication)) {
       return res.status(400).json({
@@ -80,7 +69,6 @@ exports.submitAgentApplication = async (req, res) => {
       });
     }
 
-    // Check if user already has an agent profile
     const existingAgent = await Agent.findOne({ userId: req.user.id });
     if (existingAgent) {
       return res.status(400).json({
@@ -89,7 +77,6 @@ exports.submitAgentApplication = async (req, res) => {
       });
     }
 
-    // Must have ID photo
     if (!req.files?.idPhoto) {
       return res.status(400).json({
         success: false,
@@ -127,7 +114,6 @@ exports.submitAgentApplication = async (req, res) => {
 
     console.log("✅ All validations passed");
 
-    // ✅ STEP 3: PROCESS FILES (still before database commit)
     let idPhotoUrl = "";
     try {
       console.log("Uploading professional photo to Cloudinary...");
@@ -151,7 +137,6 @@ exports.submitAgentApplication = async (req, res) => {
       });
     }
 
-    // Upload proof of address if provided
     let proofOfAddressUrl = null;
     if (req.files?.proofOfAddress) {
       try {
@@ -170,7 +155,6 @@ exports.submitAgentApplication = async (req, res) => {
         );
       } catch (uploadError) {
         console.error("Proof of address upload error:", uploadError);
-        // Don't fail the entire request if proof of address fails
         console.log("Continuing without proof of address...");
       }
     }
@@ -186,18 +170,15 @@ exports.submitAgentApplication = async (req, res) => {
 
     const referralCodeForAgent = generateReferralCode();
 
-    // ✅ STEP 4: CREATE AGENT PROFILE WITH ENHANCED DATA
     const agentData = {
       userId: req.user.id,
       fullName: req.user.name,
       email: req.user.email,
       phone: req.user.phone,
 
-      // Personal Information
       gender,
       dateOfBirth: new Date(dateOfBirth),
 
-      // Address & Location
       residentialAddress,
       state,
       city,
@@ -205,7 +186,6 @@ exports.submitAgentApplication = async (req, res) => {
       campusCode: campusCode || null,
       proofOfAddress: proofOfAddressUrl,
 
-      // Professional Information
       bio,
       experience: experience || null,
       motivation,
@@ -213,13 +193,12 @@ exports.submitAgentApplication = async (req, res) => {
       preferredCommunication,
       socialMedia: socialMedia || null,
 
-      // Contact & Verification
       whatsappNumber,
       idPhoto: idPhotoUrl,
       verificationStatus: "not verified",
 
-      referredBy: referredBy || null, // Store the referral code that was used to refer this agent
-      referralCode: referralCodeForAgent, // This agent's own unique referral code
+      referredBy: referredBy || null,
+      referralCode: referralCodeForAgent,
       freeListingWeeks: 0,
       totalReferrals: 0,
     };
@@ -227,13 +206,11 @@ exports.submitAgentApplication = async (req, res) => {
     console.log("✅ Saving to database...");
     const agent = await Agent.create(agentData);
 
-    // Update user role to agent and link agent profile
     await User.findByIdAndUpdate(req.user.id, {
       role: "agent",
       agentProfile: agent._id,
     });
 
-    // ✅ STEP 5: REWARD REFERRAL IF APPLICABLE
     if (referredByAgent) {
       console.log("🎁 Rewarding referring agent:", referredByAgent._id);
 
@@ -258,17 +235,6 @@ exports.submitAgentApplication = async (req, res) => {
           },
         }
       );
-      console.log(1);
-
-      // Create referral record
-      // await Referral.create({
-      //   referringAgent: referredByAgent._id,
-      //   newAgent: agent._id,
-      //   referralCode: referredBy, // The code that was used
-      //   rewardGiven: true,
-      //   rewardType: "free_listing_week",
-      // });
-      console.log(2);
 
       console.log(
         "✅ Referral reward given successfully. Referring agent now has:",
@@ -276,9 +242,7 @@ exports.submitAgentApplication = async (req, res) => {
         "free weeks"
       );
     }
-    console.log(3);
 
-    // Send welcome email to agent
     try {
       console.log(4);
       await sendWelcomeEmail({
@@ -291,13 +255,9 @@ exports.submitAgentApplication = async (req, res) => {
       console.log(5);
     } catch (emailError) {
       console.error("Failed to send welcome email:", emailError);
-      // Don't fail the request if email fails
     }
-    console.log(6);
 
-    // Send notification to admin about new agent application
     try {
-      console.log(7);
       await sendAdminNotification({
         type: "new_agent_application",
         agentName: req.user.name,
@@ -311,9 +271,7 @@ exports.submitAgentApplication = async (req, res) => {
     } catch (notificationError) {
       console.error("Failed to send admin notification:", notificationError);
     }
-    console.log(9);
 
-    // ✅ STEP 6: FINAL SUCCESS RESPONSE
     console.log("✅ Application submitted successfully");
     res.status(201).json({
       success: true,

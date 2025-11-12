@@ -38,5 +38,6 @@ router.get(
   authMiddleware,
   verificationController.checkVerificationStatus
 );
+router.post("/webhook/dojah", verificationController.dojahWebhook);
 
 module.exports = router;
