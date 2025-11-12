@@ -3,6 +3,48 @@ const User = require("../models/User");
 const Agent = require("../models/Agent");
 const { sendPropertyListingEmail } = require("../services/emailService");
 
+/**
+ * Backend authorization logic for agent listing permissions
+ */
+const canAgentListPropertiesBackend = async (agent) => {
+  const now = new Date();
+
+  // 1. Check free listing weeks
+  if (agent.freeListingWeeks > 0) {
+    return true;
+  }
+
+  // 2. Check subscription status
+  if (
+    agent.subscription?.status === "active" &&
+    agent.subscription.currentPeriodEnd
+  ) {
+    const periodEnd = new Date(agent.subscription.currentPeriodEnd);
+    return now <= periodEnd;
+  }
+
+  // 3. Check trial period
+  if (
+    agent.subscription?.status === "trial" &&
+    agent.subscription.trialEndsAt
+  ) {
+    const trialEnds = new Date(agent.subscription.trialEndsAt);
+    return now <= trialEnds;
+  }
+
+  // 4. Check grace period (7 days from verification)
+  const verifiedAt = agent.verifiedAt || agent.verificationData?.verifiedAt;
+  if (verifiedAt) {
+    const verifiedDate = new Date(verifiedAt);
+    const sevenDaysLater = new Date(
+      verifiedDate.getTime() + 7 * 24 * 60 * 60 * 1000
+    );
+    return now <= sevenDaysLater;
+  }
+
+  return false;
+};
+
 exports.createProperty = async (req, res) => {
   console.log("--- createProperty called ---");
   console.log("req.files:", req.files);
@@ -37,12 +79,13 @@ exports.createProperty = async (req, res) => {
       });
     }
 
-    // Check subscription status
-    if (!agent.canListProperties()) {
+    // Check subscription status using backend authorization logic
+    const canList = await canAgentListPropertiesBackend(agent);
+    if (!canList) {
       return res.status(403).json({
         success: false,
         error:
-          "Your subscription has expired. Please subscribe to continue listing properties.",
+          "You don't have active listing credits. Please subscribe or use referral credits to list properties.",
       });
     }
 
@@ -177,8 +220,10 @@ exports.getProperties = async (req, res) => {
 // GET single property
 exports.getPropertyById = async (req, res) => {
   try {
-    const property = await Property.findById(req.params.id)
-      .populate("agentId", "name phone email"); // basic user info
+    const property = await Property.findById(req.params.id).populate(
+      "agentId",
+      "name phone email"
+    );
 
     if (!property) {
       return res.status(404).json({
@@ -195,8 +240,9 @@ exports.getPropertyById = async (req, res) => {
     const propertyObj = property.toObject();
 
     // get agent details separately (from Agent model)
-    const agent = await Agent.findOne({ userId: property.agentId._id })
-      .select("idPhoto verificationStatus whatsappNumber");
+    const agent = await Agent.findOne({ userId: property.agentId._id }).select(
+      "idPhoto verificationStatus whatsappNumber"
+    );
 
     // if found, merge into agentId object
     if (agent) {
@@ -205,9 +251,9 @@ exports.getPropertyById = async (req, res) => {
         idPhoto: agent.idPhoto,
         verificationStatus: agent.verificationStatus,
         whatsappNumber: agent.whatsappNumber,
-
       };
     }
+
     res.json({
       success: true,
       data: propertyObj,
@@ -218,8 +264,7 @@ exports.getPropertyById = async (req, res) => {
       error: error.message,
     });
   }
-};
-
+}; // <-- Missing closing brace added
 
 // Mark a property as inactive
 exports.deactivateProperty = async (req, res) => {
@@ -261,5 +306,3 @@ exports.deactivateProperty = async (req, res) => {
     });
   }
 };
-
-

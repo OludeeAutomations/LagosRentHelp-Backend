@@ -4,7 +4,7 @@ const {
   getProperties,
   getPropertyById,
   createProperty,
-  deactivateProperty
+  deactivateProperty,
 } = require("../controllers/propertyController");
 const upload = require("../middleware/upload");
 const checkSubscription = require("../middleware/checkSubscription");
@@ -17,10 +17,9 @@ router.post(
   "/",
   auth,
   upload.array("images", 10),
-  checkSubscription,
+
   createProperty
 );
-router.put("/:id/deactivate",auth, deactivateProperty);
-
+router.put("/:id/deactivate", auth, deactivateProperty);
 
 module.exports = router;
