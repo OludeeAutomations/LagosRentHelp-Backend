@@ -1,6 +1,7 @@
 // controllers/verificationController.js
 const dojahService = require("../services/kycService");
 const Agent = require("../models/Agent");
+const User = require("../models/User");
 const { validationResult } = require("express-validator");
 
 exports.submitVerification = async (req, res) => {
@@ -210,5 +211,24 @@ exports.dojahWebhook = async (req, res) => {
     return res
       .status(500)
       .json({ success: false, error: "Internal server error" });
+  }
+};
+// Helper function to send notifications
+const sendVerificationNotification = async (userId, status) => {
+  try {
+    const user = await User.findById(userId);
+    if (!user) return;
+
+    let message = "";
+    if (status === "approved") {
+      message = "Your identity verification has been approved!";
+    } else if (status === "rejected") {
+      message = "Your identity verification was rejected. Please try again.";
+    }
+
+    // Send email, push notification, etc.
+    await emailService.sendVerificationUpdate(user.email, message);
+  } catch (error) {
+    console.error("Notification error:", error);
   }
 };
