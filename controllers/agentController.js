@@ -5,7 +5,6 @@ const { cloudinary } = require("../config/cloudinary");
 
 exports.submitAgentApplication = async (req, res) => {
   try {
-    // Extract all fields from the enhanced form
     const {
       gender,
       dateOfBirth,
@@ -21,24 +20,28 @@ exports.submitAgentApplication = async (req, res) => {
       preferredCommunication,
       socialMedia,
       whatsappNumber,
-      referredBy, // The referral code from the person who referred them
+      referralCode,
     } = req.body;
 
     console.log("Request body:", req.body);
     console.log("Request files:", req.files);
     console.log("Referred by code:", referredBy);
 
+    // ✅ STEP 1: VALIDATE ALL DATA FIRST (BEFORE any database operations)
+    console.log("=== VALIDATING REQUEST DATA ===");
+
+    // Validate required fields
     const requiredFields = {
-      gender,
-      dateOfBirth,
-      residentialAddress,
-      state,
-      city,
-      bio,
-      motivation,
-      hearAboutUs,
-      preferredCommunication,
-      whatsappNumber,
+      gender: cleanedBody.gender,
+      dateOfBirth: cleanedBody.dateOfBirth,
+      residentialAddress: cleanedBody.residentialAddress,
+      state: cleanedBody.state,
+      city: cleanedBody.city,
+      bio: cleanedBody.bio,
+      motivation: cleanedBody.motivation,
+      hearAboutUs: cleanedBody.hearAboutUs,
+      preferredCommunication: cleanedBody.preferredCommunication,
+      whatsappNumber: cleanedBody.whatsappNumber,
     };
 
     const missingFields = Object.entries(requiredFields)
@@ -54,6 +57,7 @@ exports.submitAgentApplication = async (req, res) => {
       });
     }
 
+    // Validate gender enum
     const validGenders = ["male", "female", "other"];
     if (!validGenders.includes(gender)) {
       return res.status(400).json({
@@ -114,6 +118,7 @@ exports.submitAgentApplication = async (req, res) => {
 
     console.log("✅ All validations passed");
 
+    // ✅ STEP 3: PROCESS FILES (still before database commit)
     let idPhotoUrl = "";
     try {
       console.log("Uploading professional photo to Cloudinary...");
@@ -170,15 +175,18 @@ exports.submitAgentApplication = async (req, res) => {
 
     const referralCodeForAgent = generateReferralCode();
 
+    // ✅ STEP 4: CREATE AGENT PROFILE WITH ENHANCED DATA
     const agentData = {
       userId: req.user.id,
       fullName: req.user.name,
       email: req.user.email,
       phone: req.user.phone,
 
+      // Personal Information
       gender,
       dateOfBirth: new Date(dateOfBirth),
 
+      // Address & Location
       residentialAddress,
       state,
       city,
@@ -186,6 +194,7 @@ exports.submitAgentApplication = async (req, res) => {
       campusCode: campusCode || null,
       proofOfAddress: proofOfAddressUrl,
 
+      // Professional Information
       bio,
       experience: experience || null,
       motivation,
@@ -193,17 +202,26 @@ exports.submitAgentApplication = async (req, res) => {
       preferredCommunication,
       socialMedia: socialMedia || null,
 
+      // Contact & Verification
       whatsappNumber,
       idPhoto: idPhotoUrl,
+      proofOfAddress: proofOfAddressUrl, // Can be null if not provided
+
       verificationStatus: "not verified",
 
-      referredBy: referredBy || null,
-      referralCode: referralCodeForAgent,
+      referredBy: referredBy || null, // Store the referral code that was used to refer this agent
+      referralCode: referralCodeForAgent, // This agent's own unique referral code
       freeListingWeeks: 0,
       totalReferrals: 0,
     };
 
-    console.log("✅ Saving to database...");
+    // ✅ Remove any undefined values to avoid schema issues
+    Object.keys(agentData).forEach((key) => {
+      if (agentData[key] === undefined) {
+        delete agentData[key];
+      }
+    });
+
     const agent = await Agent.create(agentData);
 
     await User.findByIdAndUpdate(req.user.id, {
