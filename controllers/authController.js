@@ -477,12 +477,12 @@ exports.changePassword = async (req, res) => {
 
     // Prevent using same password
     const isSamePassword = await bcrypt.compare(newPassword, user.password);
-    // if (isSamePassword) {
-    //   return res.status(400).json({
-    //     success: false,
-    //     error: "New password cannot be the same as old password",
-    //   });
-    // }
+    if (isSamePassword) {
+      return res.status(400).json({
+        success: false,
+        error: "New password cannot be the same as old password",
+      });
+    }
 
     // Update password
     user.password = newPassword;
