@@ -317,56 +317,95 @@ exports.getPropertyById = async (req, res) => {
   }
 };
 
-// Update property status (replaces deactivateProperty)
-// exports.updatePropertyStatus = async (req, res) => {
-//   try {
-//     const { id } = req.params;
-//     const { status } = req.body;
+exports.updateProperty = async (req, res) => {
+  try {
+    const { id } = req.params;
 
-//     // Validate status
-//     const validStatuses = ["available", "rented", "pending"];
-//     if (!validStatuses.includes(status)) {
-//       return res.status(400).json({
-//         success: false,
-//         error: "Invalid status. Must be one of: available, rented, pending",
-//       });
-//     }
+    // 1. Find the property
+    const property = await Property.findById(id);
+    if (!property) {
+      return res.status(404).json({
+        success: false,
+        error: "Property not found",
+      });
+    }
 
-//     // Find property by ID
-//     const property = await Property.findById(id);
+    // 2. Ensure agent owns this property
+    if (property.agentId.toString() !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        error: "You are not authorized to update this property",
+      });
+    }
 
-//     if (!property) {
-//       return res.status(404).json({
-//         success: false,
-//         error: "Property not found",
-//       });
-//     }
+    // 3. Upload new images if provided
+    let newImages = [];
 
-//     // Ensure only the agent who created the property can update it
-//     if (property.agentId.toString() !== req.user.id) {
-//       return res.status(403).json({
-//         success: false,
-//         error: "You are not authorized to update this property",
-//       });
-//     }
+    if (req.files && req.files.length > 0) {
+      try {
+        const uploadPromises = req.files.map((file) =>
+          cloudinary.uploader.upload(file.path, {
+            folder: "lagos-rent-help/agents/properties",
+            transformation: [
+              { width: 1500, height: 1024, crop: "fill" },
+              { quality: "auto" },
+            ],
+          })
+        );
 
-//     // Update property status
-//     property.status = status;
-//     await property.save();
+        const uploaded = await Promise.all(uploadPromises);
+        newImages = uploaded.map((img) => img.secure_url);
+      } catch (err) {
+        console.error("Image upload error:", err);
+        return res.status(400).json({
+          success: false,
+          error: `Failed to upload images: ${err.message}`,
+        });
+      }
+    }
 
-//     res.json({
-//       success: true,
-//       message: `Property status updated to ${status}`,
-//       data: property,
-//     });
-//   } catch (error) {
-//     console.error("Update Property Status Error:", error);
-//     res.status(500).json({
-//       success: false,
-//       error: error.message,
-//     });
-//   }
-// };
+    // 4. Parse amenities if JSON string
+    let amenities = property.amenities;
+    if (req.body.amenities) {
+      try {
+        amenities = JSON.parse(req.body.amenities);
+      } catch {
+        amenities = property.amenities;
+      }
+    }
+
+    // 5. Build updated fields safely (ignore empty fields)
+    const updates = {
+      title: req.body.title ?? property.title,
+      description: req.body.description ?? property.description,
+      price: req.body.price ?? property.price,
+      bedrooms: req.body.bedrooms ?? property.bedrooms,
+      bathrooms: req.body.bathrooms ?? property.bathrooms,
+      location: req.body.location ?? property.location,
+      type: req.body.type ?? property.type,
+      status: req.body.status ?? property.status,
+      amenities,
+      images: newImages.length > 0 ? newImages : property.images,
+    };
+
+    // 6. Apply changes
+    Object.assign(property, updates);
+    await property.save();
+
+    res.json({
+      success: true,
+      message: "Property updated successfully",
+      data: property,
+    });
+  } catch (error) {
+    console.error("Update Property Error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+};
+
 
 // Optional: Keep deactivateProperty as a convenience function
 exports.deactivateProperty = async (req, res) => {
