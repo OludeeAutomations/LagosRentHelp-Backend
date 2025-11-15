@@ -34,7 +34,12 @@ const propertySchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
-    isActive: { type: Boolean, default: true },
+    status: {
+      type: String,
+      enum: ["available", "rented", "pending"], // Make sure it's exactly this
+      default: "available",
+    },
+
     views: { type: Number, default: 0 },
     likes: {
       type: Number,

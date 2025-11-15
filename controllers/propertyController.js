@@ -2,7 +2,6 @@ const Property = require("../models/Property");
 const User = require("../models/User");
 const Agent = require("../models/Agent");
 const { sendPropertyListingEmail } = require("../services/emailService");
-
 /**
  * Backend authorization logic for agent listing permissions
  */
@@ -59,7 +58,7 @@ exports.createProperty = async (req, res) => {
       });
     }
 
-    // Find agent and check verification status
+    // ✅ FIXED: Find agent by userId (not agentId)
     const agent = await Agent.findOne({ userId: req.user.id });
 
     if (!agent) {
@@ -89,12 +88,37 @@ exports.createProperty = async (req, res) => {
       });
     }
 
-    // Extract Cloudinary URLs from req.files
-    const imageUrls = [];
+    // ✅ FIXED: Handle file uploads safely
+    let imageUrls = [];
+
     if (req.files && req.files.length > 0) {
-      for (const file of req.files) {
-        imageUrls.push(file.path);
+      try {
+        console.log("Uploading property photos to Cloudinary...");
+
+        // Upload all files to Cloudinary
+        const uploadPromises = req.files.map((file) =>
+          cloudinary.uploader.upload(file.path, {
+            folder: "lagos-rent-help/agents/properties",
+            transformation: [
+              { width: 1500, height: 1024, crop: "fill" },
+              { quality: "auto" },
+            ],
+          })
+        );
+
+        const uploadResults = await Promise.all(uploadPromises);
+        imageUrls = uploadResults.map((result) => result.secure_url);
+
+        console.log("Property photos uploaded to Cloudinary:", imageUrls);
+      } catch (uploadError) {
+        console.error("Property photo upload error:", uploadError);
+        return res.status(400).json({
+          success: false,
+          error: `Failed to upload property photos: ${uploadError.message}`,
+        });
       }
+    } else {
+      console.log("No files uploaded for this property");
     }
 
     // Parse amenities if it comes as JSON string
@@ -123,24 +147,31 @@ exports.createProperty = async (req, res) => {
 
     await property.save();
 
+    // ✅ UPDATE AGENT'S LISTINGS ARRAY
+    agent.listings.push(property._id);
+    await agent.save();
+
     // Send email to agent
     const user = await User.findById(req.user.id);
-    const agentProfile = await Agent.findOne({ userId: req.user.id });
 
-    if (user && agentProfile) {
+    // We already have the agent, no need to find it again
+    if (user && agent) {
       await sendPropertyListingEmail(
-        { ...user.toObject(), ...agentProfile.toObject() },
+        { ...user.toObject(), ...agent.toObject() },
         property
       );
     }
 
-    res.status(201).json({ success: true, data: property });
+    res.status(201).json({
+      success: true,
+      data: property,
+      message: "Property listed successfully and added to your listings",
+    });
   } catch (error) {
-    console.error(error);
+    console.error("Create Property Error:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
-
 exports.getProperties = async (req, res) => {
   try {
     const {
@@ -150,12 +181,30 @@ exports.getProperties = async (req, res) => {
       maxPrice,
       bedrooms,
       amenities,
+      status,
       sortBy,
       page = 1,
       limit = 10,
     } = req.query;
 
-    let filter = { isActive: true };
+    let filter = {};
+
+    // ✅ Handle status filter - support multiple statuses with default
+    if (status) {
+      if (Array.isArray(status)) {
+        // If status is an array (e.g., ?status=available&status=pending)
+        filter.status = { $in: status };
+      } else if (typeof status === "string" && status.includes(",")) {
+        // If status is a comma-separated string (e.g., ?status=available,pending)
+        filter.status = { $in: status.split(",") };
+      } else {
+        // If status is a single value
+        filter.status = status;
+      }
+    } else {
+      // ✅ DEFAULT: Show only available properties when no status is provided
+      filter.status = "available";
+    }
 
     if (location) filter.location = new RegExp(location, "i");
     if (type) filter.type = type;
@@ -208,6 +257,9 @@ exports.getProperties = async (req, res) => {
         total,
         pages: Math.ceil(total / limit),
       },
+      filters: {
+        status: filter.status, // Return the applied status filter for clarity
+      },
     });
   } catch (error) {
     res.status(500).json({
@@ -216,7 +268,6 @@ exports.getProperties = async (req, res) => {
     });
   }
 };
-
 // GET single property
 exports.getPropertyById = async (req, res) => {
   try {
@@ -264,9 +315,60 @@ exports.getPropertyById = async (req, res) => {
       error: error.message,
     });
   }
-}; // <-- Missing closing brace added
+};
 
-// Mark a property as inactive
+// Update property status (replaces deactivateProperty)
+// exports.updatePropertyStatus = async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     const { status } = req.body;
+
+//     // Validate status
+//     const validStatuses = ["available", "rented", "pending"];
+//     if (!validStatuses.includes(status)) {
+//       return res.status(400).json({
+//         success: false,
+//         error: "Invalid status. Must be one of: available, rented, pending",
+//       });
+//     }
+
+//     // Find property by ID
+//     const property = await Property.findById(id);
+
+//     if (!property) {
+//       return res.status(404).json({
+//         success: false,
+//         error: "Property not found",
+//       });
+//     }
+
+//     // Ensure only the agent who created the property can update it
+//     if (property.agentId.toString() !== req.user.id) {
+//       return res.status(403).json({
+//         success: false,
+//         error: "You are not authorized to update this property",
+//       });
+//     }
+
+//     // Update property status
+//     property.status = status;
+//     await property.save();
+
+//     res.json({
+//       success: true,
+//       message: `Property status updated to ${status}`,
+//       data: property,
+//     });
+//   } catch (error) {
+//     console.error("Update Property Status Error:", error);
+//     res.status(500).json({
+//       success: false,
+//       error: error.message,
+//     });
+//   }
+// };
+
+// Optional: Keep deactivateProperty as a convenience function
 exports.deactivateProperty = async (req, res) => {
   try {
     const { id } = req.params;
@@ -289,13 +391,13 @@ exports.deactivateProperty = async (req, res) => {
       });
     }
 
-    // Mark property as inactive
-    property.isActive = false;
+    // ✅ FIXED: Update status instead of isActive
+    property.status = "rented";
     await property.save();
 
     res.json({
       success: true,
-      message: "Property has been marked as inactive",
+      message: "Property has been marked as rented",
       data: property,
     });
   } catch (error) {

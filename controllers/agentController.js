@@ -28,7 +28,6 @@ exports.submitAgentApplication = async (req, res) => {
     console.log("Request files:", req.files);
     console.log("Referred by code:", referredBy);
 
-
     const requiredFields = {
       gender,
       dateOfBirth,
@@ -198,8 +197,8 @@ exports.submitAgentApplication = async (req, res) => {
       idPhoto: idPhotoUrl,
       verificationStatus: "not verified",
 
-      referredBy: referredBy || null, 
-      referralCode: referralCodeForAgent, 
+      referredBy: referredBy || null,
+      referralCode: referralCodeForAgent,
       freeListingWeeks: 0,
       totalReferrals: 0,
     };
@@ -237,8 +236,6 @@ exports.submitAgentApplication = async (req, res) => {
         }
       );
 
-      
-
       console.log(
         "✅ Referral reward given successfully. Referring agent now has:",
         referredByAgent.freeListingWeeks,
@@ -247,7 +244,6 @@ exports.submitAgentApplication = async (req, res) => {
     }
 
     try {
-      console.log(4);
       await sendWelcomeEmail({
         id: req.user.id,
         name: req.user.name,
