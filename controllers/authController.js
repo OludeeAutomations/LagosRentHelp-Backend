@@ -436,6 +436,77 @@ exports.resetPassword = async (req, res) => {
   }
 };
 
+
+exports.changePassword = async (req, res) => {
+  try {
+    const userId = req.user._id; // from auth middleware
+    const { oldPassword, newPassword, confirmPassword } = req.body;
+
+    // Validate inputs
+    if (!oldPassword || !newPassword || !confirmPassword) {
+      return res.status(400).json({
+        success: false,
+        error: "All fields are required",
+      });
+    }
+
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({
+        success: false,
+        error: "New passwords do not match",
+      });
+    }
+
+    // Find user
+    const user = await User.findById(userId).select("+password");
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found",
+      });
+    }
+
+    // Compare old password
+    const isMatch = await bcrypt.compare(oldPassword, user.password);
+    if (!isMatch) {
+      return res.status(401).json({
+        success: false,
+        error: "Old password is incorrect",
+      });
+    }
+
+    // Prevent using same password
+    const isSamePassword = await bcrypt.compare(newPassword, user.password);
+    if (isSamePassword) {
+      return res.status(400).json({
+        success: false,
+        error: "New password cannot be the same as old password",
+      });
+    }
+
+    // Update password
+    user.password = newPassword;
+
+    // Invalidate all active refresh tokens (logout everywhere)
+    user.tokenVersion += 1;
+
+    await user.save();
+    await sendResetPasswordSuccessEmail(user)
+
+    return res.status(200).json({
+      success: true,
+      message: "Password changed successfully",
+    });
+  } catch (error) {
+    console.error("Change password error:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Something went wrong",
+    });
+  }
+};
+
+
 exports.refresh = async (req, res) => {
   const token = req.cookies.refreshToken;
   if (!token) return res.status(401).json({ message: "No token" });
