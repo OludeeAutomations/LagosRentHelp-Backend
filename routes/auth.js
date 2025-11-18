@@ -2,6 +2,7 @@ const express = require("express");
 const {
   register,
   login,
+  loginWithGoogle,
   verifyEmail,
   requestPasswordReset,
   resetPassword,
@@ -15,6 +16,7 @@ const router = express.Router();
 
 router.post("/register", register);
 router.post("/login", login);
+router.post("/google", loginWithGoogle);
 router.post("/forgot-password", requestPasswordReset);
 router.post("/reset-password", resetPassword);
 router.post("/change-password",auth, changePassword);
