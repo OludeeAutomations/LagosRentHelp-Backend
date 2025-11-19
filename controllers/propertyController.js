@@ -5,6 +5,7 @@ const { sendPropertyListingEmail } = require("../services/emailService");
 /**
  * Backend authorization logic for agent listing permissions
  */
+
 const canAgentListPropertiesBackend = async (agent) => {
   const now = new Date();
 
@@ -91,11 +92,10 @@ exports.createProperty = async (req, res) => {
     // ✅ FIXED: Handle file uploads safely
     let imageUrls = [];
 
+    // Check multiple files
     if (req.files && req.files.length > 0) {
+      console.log(`📸 Found ${req.files.length} files in req.files`);
       try {
-        console.log("Uploading property photos to Cloudinary...");
-
-        // Upload all files to Cloudinary
         const uploadPromises = req.files.map((file) =>
           cloudinary.uploader.upload(file.path, {
             folder: "lagos-rent-help/agents/properties",
@@ -108,18 +108,47 @@ exports.createProperty = async (req, res) => {
 
         const uploadResults = await Promise.all(uploadPromises);
         imageUrls = uploadResults.map((result) => result.secure_url);
-
-        console.log("Property photos uploaded to Cloudinary:", imageUrls);
+        console.log("✅ Property photos uploaded to Cloudinary:", imageUrls);
       } catch (uploadError) {
-        console.error("Property photo upload error:", uploadError);
+        console.error("❌ Property photo upload error:", uploadError);
         return res.status(400).json({
           success: false,
           error: `Failed to upload property photos: ${uploadError.message}`,
         });
       }
-    } else {
-      console.log("No files uploaded for this property");
     }
+    // Check single file
+    else if (req.file) {
+      console.log("📸 Found single file in req.file");
+      try {
+        const result = await cloudinary.uploader.upload(req.file.path, {
+          folder: "lagos-rent-help/agents/properties",
+          transformation: [
+            { width: 1500, height: 1024, crop: "fill" },
+            { quality: "auto" },
+          ],
+        });
+        imageUrls = [result.secure_url];
+        console.log("✅ Single property photo uploaded:", imageUrls[0]);
+      } catch (uploadError) {
+        console.error("❌ Single photo upload error:", uploadError);
+        return res.status(400).json({
+          success: false,
+          error: `Failed to upload property photo: ${uploadError.message}`,
+        });
+      }
+    }
+    // No files
+    else {
+      console.log("❌ No files found in req.files or req.file");
+      console.log("🔍 Available request properties:", Object.keys(req));
+      return res.status(400).json({
+        success: false,
+        error: "No images uploaded. Please upload at least one property image.",
+      });
+    }
+
+    // ... rest of your code ...
 
     // Parse amenities if it comes as JSON string
     let amenities = [];
@@ -283,19 +312,23 @@ exports.getPropertyById = async (req, res) => {
       });
     }
 
-    // increment views
-    property.views += 1;
-    await property.save();
-
-    // convert to plain JS object
-    const propertyObj = property.toObject();
-
-    // get agent details separately (from Agent model)
+    // Get agent details first
     const agent = await Agent.findOne({ userId: property.agentId._id }).select(
-      "idPhoto verificationStatus whatsappNumber"
+      "idPhoto verificationStatus whatsappNumber totalViews"
     );
 
-    // if found, merge into agentId object
+    // Increment views - now agent is defined
+    property.views += 1;
+    if (agent) {
+      agent.totalViews += 1;
+      await agent.save();
+    }
+    await property.save();
+
+    // Convert to plain JS object
+    const propertyObj = property.toObject();
+
+    // If agent found, merge into agentId object
     if (agent) {
       propertyObj.agentId = {
         ...propertyObj.agentId,

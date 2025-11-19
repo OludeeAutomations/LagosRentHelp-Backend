@@ -13,7 +13,7 @@ const router = express.Router();
 
 router.get("/", getProperties);
 router.get("/:id", getPropertyById);
-router.post("/properties", auth, upload.array("images", 10), createProperty);
+router.post("/", auth, upload.array("images", 10), createProperty);
 
 router.put("/:id/deactivate", auth, deactivateProperty);
 
