@@ -210,7 +210,7 @@ exports.getAgentLeads = async (req, res) => {
     console.error("Error fetching agent leads:", error);
     res.status(500).json({
       success: false,
-      error: error.message,.
+      error: error.message,
     });
   }
 };
