@@ -1,6 +1,7 @@
 // const { send } = require("@emailjs/nodejs"); // import send directly
 const emailTemplates = require("../utils/emailTemplates");
 const emailjs = require('@emailjs/nodejs');
+const createNotification = require('../services/notificationService')
 
 // Initialize with your keys (optional but recommended)
 emailjs.init({
@@ -163,6 +164,15 @@ const sendResetPasswordSuccessEmail = async (user) => {
       templateParams,
     );
 
+    await createNotification({
+      userId: user._id,
+      type: "system_update",
+      title: "Password Changed",
+      message: "Your account password was changed successfully.",
+      priority: "high",
+      actionRequired: false,
+    });
+
     console.log("Password reset success email sent!", response.status, response.text);
     return { success: true };
   } catch (error) {
@@ -203,6 +213,16 @@ const sendKycResponse = async (user, status) => {
       process.env.EMAILJS_PUBLIC_KEY // required for client-side calls
     );
 
+    await createNotification({
+      userId: user._id,
+      type: "system_update",
+      title: notificationTitle,
+      message: notificationMessage,
+      priority: "high",
+      actionRequired: false,
+      link: templateParams.buttonLink || null, // optional: link to KYC page
+    });
+
     console.log("✅ KYC status email sent", response.status, response.text);
     return { success: true };
   } catch (error) {
@@ -237,6 +257,16 @@ const sendPropertyListingEmail = async (agent, property) => {
       process.env.EMAILJS_UNIVERSAL_TEMPLATE_ID, // create this template in EmailJS
       templateParams,
     );
+
+      await createNotification({
+      userId: agent.userId, // assuming agent.userId references the User
+      type: "listing_approved",
+      title: "Property Listing Approved",
+      message: `Your property "${property.name || property.title}" has been approved and listed successfully.`,
+      priority: "high",
+      actionRequired: false,
+      link: `/properties/${property._id}`, // optional: link to the property
+    });
 
     console.log("Universal email sent!", response.status, response.text);
     return { success: true };
