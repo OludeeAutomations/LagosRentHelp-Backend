@@ -60,7 +60,7 @@ exports.createProperty = async (req, res) => {
     }
 
     // ✅ FIXED: Find agent by userId (not agentId)
-    const agent = await Agent.findOne({ userId: req.user.id });
+    const agent = await Agent.findOne({ userId: req.agent.id });
 
     if (!agent) {
       return res.status(403).json({
@@ -171,7 +171,7 @@ exports.createProperty = async (req, res) => {
 
     const property = new Property({
       ...normalizedBody,
-      agentId: req.user.id,
+      agentId: req.agent.id,
     });
 
     await property.save();
@@ -300,10 +300,10 @@ exports.getProperties = async (req, res) => {
 // GET single property
 exports.getPropertyById = async (req, res) => {
   try {
-    const property = await Property.findById(req.params.id).populate(
-      "agentId",
-      "name phone email"
-    );
+    // Your Property model has agentId, not userId
+    const property = await Property.findById(req.params.id)
+      .populate("agentId", "name phone email") // Populate agentId (which references User model)
+      .lean();
 
     if (!property) {
       return res.status(404).json({
@@ -312,47 +312,63 @@ exports.getPropertyById = async (req, res) => {
       });
     }
 
-    // Get agent details first
-    const agent = await Agent.findOne({ userId: property.agentId._id }).select(
-      "idPhoto verificationStatus whatsappNumber totalViews"
-    );
-
-    // Increment views - now agent is defined
-    property.views += 1;
-    if (agent) {
-      agent.totalViews += 1;
-      await agent.save();
-    }
-    await property.save();
-
-    // Convert to plain JS object
-    const propertyObj = property.toObject();
-
-    // If agent found, merge into agentId object
-    if (agent) {
-      propertyObj.agentId = {
-        ...propertyObj.agentId,
-        idPhoto: agent.idPhoto,
-        verificationStatus: agent.verificationStatus,
-        whatsappNumber: agent.whatsappNumber,
-      };
+    // Check if property has an agent assigned
+    if (!property.agentId) {
+      return res.status(400).json({
+        success: false,
+        error: "This property has no assigned agent",
+      });
     }
 
+    // FIXED: Find agent profile using the agentId (which is actually the user ID)
+    const agent = await Agent.findOne({ userId: property.agentId._id })
+      .select(
+        "idPhoto verificationStatus whatsappNumber totalViews bio experience rating totalReviews"
+      )
+      .lean();
+
+    // Increment views
+    await Property.findByIdAndUpdate(req.params.id, {
+      $inc: { views: 1 },
+    });
+
+    if (agent) {
+      await Agent.findByIdAndUpdate(agent._id, {
+        $inc: { totalViews: 1 },
+      });
+    }
+
+    const responseData = {
+      ...property,
+      agent: agent
+        ? {
+            ...property.agent,
+            agentId: agent._id, // Include the agent document ID
+            verificationStatus: agent.verificationStatus,
+          }
+        : null,
+    };
     res.json({
       success: true,
-      data: propertyObj,
+      data: responseData,
     });
   } catch (error) {
+    console.error("Error fetching property:", error);
     res.status(500).json({
       success: false,
       error: error.message,
     });
   }
 };
+const { cloudinary } = require("../config/cloudinary");
 
 exports.updateProperty = async (req, res) => {
   try {
     const { id } = req.params;
+
+    console.log("🔄 Starting property update for ID:", id);
+    console.log("Request body:", req.body);
+    console.log("Files:", req.files ? req.files.length : 0);
 
     // 1. Find the property
     const property = await Property.findById(id);
@@ -363,7 +379,15 @@ exports.updateProperty = async (req, res) => {
       });
     }
 
-    // 2. Ensure agent owns this property
+    console.log("📋 Found property:", {
+      id: property._id,
+      title: property.title,
+      amenities: property.amenities,
+      amenitiesType: typeof property.amenities,
+      isArray: Array.isArray(property.amenities),
+    });
+
+    // 2. Check authorization
     if (property.agentId.toString() !== req.user.id) {
       return res.status(403).json({
         success: false,
@@ -373,21 +397,24 @@ exports.updateProperty = async (req, res) => {
 
     // 3. Upload new images if provided
     let newImages = [];
-
     if (req.files && req.files.length > 0) {
       try {
-        const uploadPromises = req.files.map((file) =>
-          cloudinary.uploader.upload(file.path, {
+        console.log(`📁 Processing ${req.files.length} files for upload...`);
+
+        const uploadPromises = req.files.map((file) => {
+          console.log(`📁 Processing file: ${file.originalname}`);
+          return cloudinary.uploader.upload(file.path, {
             folder: "lagos-rent-help/agents/properties",
             transformation: [
               { width: 1500, height: 1024, crop: "fill" },
               { quality: "auto" },
             ],
-          })
-        );
+          });
+        });
 
         const uploaded = await Promise.all(uploadPromises);
         newImages = uploaded.map((img) => img.secure_url);
+        console.log(`✅ Successfully uploaded ${newImages.length} images`);
       } catch (err) {
         console.error("Image upload error:", err);
         return res.status(400).json({
@@ -397,7 +424,7 @@ exports.updateProperty = async (req, res) => {
       }
     }
 
-    // 4. Parse amenities if JSON string
+    // 4. Handle amenities safely with proper fallbacks
     let amenities = property.amenities;
     if (req.body.amenities) {
       try {
@@ -407,23 +434,57 @@ exports.updateProperty = async (req, res) => {
       }
     }
 
-    // 5. Build updated fields safely (ignore empty fields)
+    console.log("🏠 Final amenities to save:", amenities);
+
+    // 5. Handle totalPackagePrice - ensure it's a number, not an array
+    let totalPackagePrice = property.totalPackagePrice || 0;
+    if (req.body.totalPackagePrice) {
+      // If it's an array, take the first value
+      if (Array.isArray(req.body.totalPackagePrice)) {
+        totalPackagePrice = Number(req.body.totalPackagePrice[0]) || 0;
+      } else {
+        totalPackagePrice = Number(req.body.totalPackagePrice) || 0;
+      }
+    }
+
+    // 6. Build updated fields safely with proper type conversion and fallbacks
     const updates = {
       title: req.body.title ?? property.title,
       description: req.body.description ?? property.description,
-      price: req.body.price ?? property.price,
-      bedrooms: req.body.bedrooms ?? property.bedrooms,
-      bathrooms: req.body.bathrooms ?? property.bathrooms,
+      price: req.body.price ? Number(req.body.price) : property.price,
+      totalPackagePrice: totalPackagePrice,
+      bedrooms: req.body.bedrooms
+        ? Number(req.body.bedrooms)
+        : property.bedrooms || 0,
+      bathrooms: req.body.bathrooms
+        ? Number(req.body.bathrooms)
+        : property.bathrooms || 0,
       location: req.body.location ?? property.location,
       type: req.body.type ?? property.type,
       status: req.body.status ?? property.status,
       amenities,
-      images: newImages.length > 0 ? newImages : property.images,
+      images: newImages.length > 0 ? newImages : property.images || [],
     };
 
-    // 6. Apply changes
-    Object.assign(property, updates);
+    // 7. Remove undefined values to avoid overwriting with undefined
+    Object.keys(updates).forEach((key) => {
+      if (updates[key] === undefined) {
+        delete updates[key];
+      }
+    });
+
+    console.log("🔄 Applying updates:", updates);
+
+    // 8. Apply changes directly to the Mongoose document
+    Object.keys(updates).forEach((key) => {
+      property[key] = updates[key];
+    });
+
+    // 9. Validate and save
+    await property.validate(); // This will trigger Mongoose validation
     await property.save();
+
+    console.log("✅ Property updated successfully");
 
     res.json({
       success: true,
@@ -438,8 +499,6 @@ exports.updateProperty = async (req, res) => {
     });
   }
 };
-
-
 // Optional: Keep deactivateProperty as a convenience function
 exports.deactivateProperty = async (req, res) => {
   try {
@@ -456,7 +515,7 @@ exports.deactivateProperty = async (req, res) => {
     }
 
     // Ensure only the agent who created the property can deactivate it
-    if (property.agentId.toString() !== req.user.id) {
+    if (property.agentId.toString() !== req.agent.id) {
       return res.status(403).json({
         success: false,
         error: "You are not authorized to deactivate this property",

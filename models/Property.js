@@ -6,6 +6,7 @@ const propertySchema = new mongoose.Schema(
     description: { type: String, required: true },
     price: { type: Number, required: true, min: 0 },
     location: { type: String, required: true },
+    totalPackagePrice: { type: Number, min: 0 },
     type: {
       type: String,
       required: true,
