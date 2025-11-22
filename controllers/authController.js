@@ -288,7 +288,6 @@ exports.loginWithGoogle = async (req, res) => {
       });
     }
 
-    // 1. VERIFY GOOGLE TOKEN
     const ticket = await client.verifyIdToken({
       idToken,
       audience: process.env.GOOGLE_CLIENT_ID,
@@ -310,7 +309,6 @@ exports.loginWithGoogle = async (req, res) => {
       });
     }
 
-    // 2. CHECK USER OR CREATE
     let user = await User.findOne({ email }).select("+password");
 
     if (!user) {
@@ -326,17 +324,14 @@ exports.loginWithGoogle = async (req, res) => {
       await user.save();
     }
 
-    // Update last login timestamp
     user.lastLogin = new Date();
     await user.save();
 
-    // If agent, attach agentData
     let agentData = null;
     if (user.role === "agent") {
       agentData = await Agent.findOne({ userId: user._id });
     }
 
-    // 3. GENERATE TOKENS
     const accessToken = createAccessToken(user);
     const refreshToken = createRefreshToken(user);
 
@@ -349,12 +344,10 @@ exports.loginWithGoogle = async (req, res) => {
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
-    // 5. PREPARE SAFE USER
     const safeUser = user.toObject();
     delete safeUser.password;
     delete safeUser.verification;
 
-    // 6. SEND SAME RESPONSE FORMAT AS NORMAL LOGIN
     return res.status(200).json({
       success: true,
       accessToken,

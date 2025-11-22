@@ -425,10 +425,13 @@ exports.updateProperty = async (req, res) => {
     }
 
     // 4. Handle amenities safely with proper fallbacks
-    let amenities = property.amenities;
+    let amenities = Array.isArray(property.amenities) ? property.amenities : [];
     if (req.body.amenities) {
       try {
-        amenities = JSON.parse(req.body.amenities);
+        const parsed = JSON.parse(req.body.amenities);
+        if (Array.isArray(parsed)) {
+          amenities = parsed;
+        }      
       } catch {
         amenities = property.amenities;
       }
