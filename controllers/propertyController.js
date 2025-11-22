@@ -2,6 +2,8 @@ const Property = require("../models/Property");
 const User = require("../models/User");
 const Agent = require("../models/Agent");
 const { sendPropertyListingEmail } = require("../services/emailService");
+const { cloudinary } = require("../config/cloudinary");
+
 /**
  * Backend authorization logic for agent listing permissions
  */
@@ -360,7 +362,6 @@ exports.getPropertyById = async (req, res) => {
     });
   }
 };
-const { cloudinary } = require("../config/cloudinary");
 
 exports.updateProperty = async (req, res) => {
   try {
@@ -542,3 +543,53 @@ exports.deactivateProperty = async (req, res) => {
     });
   }
 };
+
+exports.deleteProperty = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const property = await Property.findById(id);
+
+    if (!property) {
+      return res.status(404).json({
+        success: false,
+        error: "Property not found",
+      });
+    }
+
+    if (property.agentId.toString() !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        error: "You are not authorized to delete this property",
+      });
+    }
+
+    if (property.images && property.images.length > 0) {
+      const deletePromises = property.images.map((imageUrl) => {
+        const publicId = imageUrl
+          .split("/")
+          .slice(-2)
+          .join("/")
+          .split(".")[0]; // extract folder/file without extension
+
+        return cloudinary.uploader.destroy(publicId);
+      });
+
+      await Promise.all(deletePromises);
+    }
+
+    await Property.findByIdAndDelete(id);
+
+    return res.json({
+      success: true,
+      message: "Property deleted successfully",
+    });
+  } catch (error) {
+    console.error("Delete Property Error:", error);
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+};
+
