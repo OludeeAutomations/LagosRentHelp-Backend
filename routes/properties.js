@@ -18,6 +18,10 @@ router.post("/", auth, upload.array("images", 10), createProperty);
 
 router.put("/:id/deactivate", auth, deactivateProperty);
 
-router.put("/:id", auth, updateProperty);
-
+router.put(
+  "/:id",
+  auth, // specific to your auth middleware
+  upload.array("images"), // This is REQUIRED to parse req.body from FormData
+  updateProperty
+);
 module.exports = router;

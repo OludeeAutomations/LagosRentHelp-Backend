@@ -84,7 +84,6 @@ exports.submitAgentApplication = async (req, res) => {
       });
     }
 
-    // ✅ STEP 2: CHECK REFERRAL CODE AND FIND REFERRING AGENT
     let referredByAgent = null;
     if (referredBy && referredBy.trim() !== "") {
       console.log("🔄 Validating referral code:", referredBy);
@@ -214,32 +213,35 @@ exports.submitAgentApplication = async (req, res) => {
     if (referredByAgent) {
       console.log("🎁 Rewarding referring agent:", referredByAgent._id);
 
-      // Give the referring agent 1 free listing week
-      referredByAgent.freeListingWeeks += 1;
-      console.log(
-        "referredByAgent.freeListingWeeks: ",
-        referredByAgent.freeListingWeeks
-      );
-      referredByAgent.totalReferrals += 1;
-      console.log(
-        "referredByAgent.totalReferrals: ",
-        referredByAgent.totalReferrals
-      );
-      console.log("referredByAgent: ", referredByAgent);
-      await Agent.findOneAndUpdate(
-        { referralCode: referredBy },
-        {
-          $inc: {
-            totalReferrals: 1,
-            freeListingWeeks: 1,
-          },
-        }
-      );
+      // 1. Calculate the new date
+      const OneWeekInMs = 7 * 24 * 60 * 60 * 1000;
+      let currentEndDate = referredByAgent.subscription.trialEndsAt
+        ? new Date(referredByAgent.subscription.trialEndsAt)
+        : new Date(); // If no date exists, assume 'now'
+
+      // Check if their trial has already expired
+      if (currentEndDate < new Date()) {
+        // If expired, restart it from NOW + 1 week
+        currentEndDate = new Date(new Date().getTime() + OneWeekInMs);
+      } else {
+        // If still active, extend the existing date by 1 week
+        currentEndDate = new Date(currentEndDate.getTime() + OneWeekInMs);
+      }
+
+      // 2. Update the Referring Agent
+      await Agent.findByIdAndUpdate(referredByAgent._id, {
+        $inc: { totalReferrals: 1 }, // Keep track of count for stats
+        $set: {
+          "subscription.trialEndsAt": currentEndDate, // ✅ Extend the actual access time
+          "subscription.status": "trial", // Ensure status is active
+          // Optional: You can still increment this number just for display purposes
+          // freeListingWeeks: (referredByAgent.freeListingWeeks || 0) + 1
+        },
+      });
 
       console.log(
-        "✅ Referral reward given successfully. Referring agent now has:",
-        referredByAgent.freeListingWeeks,
-        "free weeks"
+        "✅ Referral reward applied. Agent access extended until:",
+        currentEndDate
       );
     }
 
@@ -356,13 +358,26 @@ exports.getTopAgents = async (req, res) => {
     });
   }
 };
+const mongoose = require("mongoose");
 
 exports.getAgentProfile = async (req, res) => {
   try {
-    // Find the agent and populate full user details
-    const agent = await Agent.findOne({ userId: req.params.id }).populate(
-      "userId"
-    ); // Get all user fields
+    const { id } = req.params;
+    let agent;
+
+    // 1. Try to find by Agent Document ID (Most common for public profiles)
+    // We populate 'userId' to get the name, email, etc.
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      agent = await Agent.findById(id).populate("userId", "-password");
+    }
+
+    // 2. If not found, try to find by User ID (Common for dashboard/me routes)
+    if (!agent && mongoose.Types.ObjectId.isValid(id)) {
+      agent = await Agent.findOne({ userId: id }).populate(
+        "userId",
+        "-password"
+      );
+    }
 
     if (!agent) {
       return res.status(404).json({
@@ -371,40 +386,41 @@ exports.getAgentProfile = async (req, res) => {
       });
     }
 
-    // Fetch all properties linked to this agent
+    // 3. Fetch all properties linked to this agent
+    // IMPORTANT: Property.agentId stores the AGENT Profile ID, not the User ID
     const properties = await Property.find({
-      agentId: req.params.id,
-    });
+      agentId: agent._id,
+    }).sort({ createdAt: -1 }); // Newest first
 
-    // Compute stats
+    // 4. Compute stats
     const stats = {
       totalListings: properties.length,
       activeListings: properties.filter((p) => p.status === "available").length,
       rentedListings: properties.filter((p) => p.status === "rented").length,
     };
 
-    // Respond with everything
+    // 5. Respond
     res.json({
       success: true,
       data: {
         agent: agent.toObject(),
-        user: agent.userId, // full user details
-        properties, // full properties list
-        stats, // computed stats
+        user: agent.userId, // This is the populated User object
+        properties,
+        stats,
       },
     });
   } catch (error) {
+    console.error("Get Agent Profile Error:", error);
     res.status(500).json({
       success: false,
       error: error.message,
     });
   }
 };
-
 exports.getLoggedInAgentProfile = async (req, res) => {
   try {
-    const agent = await Agent.findOne({ userId: req.user.id })
-      .populate("userId", "name email phone avatar role")
+    const agent = await Agent.findOne({ userId: req.agent.id })
+      .populate("agentId", "name email phone avatar role")
       .lean();
 
     if (!agent) {

@@ -2,9 +2,6 @@ const Property = require("../models/Property");
 const User = require("../models/User");
 const Agent = require("../models/Agent");
 const { sendPropertyListingEmail } = require("../services/emailService");
-/**
- * Backend authorization logic for agent listing permissions
- */
 
 const canAgentListPropertiesBackend = async (agent) => {
   const now = new Date();
@@ -46,21 +43,17 @@ const canAgentListPropertiesBackend = async (agent) => {
 };
 
 exports.createProperty = async (req, res) => {
-  console.log("--- createProperty called ---");
-  console.log("req.files:", req.files);
-  console.log("req.body:", req.body);
-
   try {
-    // Check if user is an agent
-    if (req.user.role !== "agent") {
+    // 1. Check User Auth
+    if (!req.user || req.user.role !== "agent") {
       return res.status(403).json({
         success: false,
         error: "Only agents can create properties",
       });
     }
 
-    // ✅ FIXED: Find agent by userId (not agentId)
-    const agent = await Agent.findOne({ userId: req.agent.id });
+    // 2. Find Agent Profile
+    const agent = await Agent.findOne({ userId: req.user.id });
 
     if (!agent) {
       return res.status(403).json({
@@ -70,31 +63,27 @@ exports.createProperty = async (req, res) => {
       });
     }
 
-    // Check if agent is verified
+    // 3. Check Verification
     if (agent.verificationStatus !== "verified") {
       return res.status(403).json({
         success: false,
-        error:
-          "Your agent account is not verified yet. Please wait for verification to create listings.",
+        error: "Your agent account is not verified yet.",
       });
     }
 
-    // Check subscription status using backend authorization logic
-    const canList = await canAgentListPropertiesBackend(agent);
-    if (!canList) {
+    // 4. Check Restrictions (Re-enabled)
+    // This uses your model method to check for 6-month trial / referral extensions
+    if (!agent.canListProperties()) {
       return res.status(403).json({
         success: false,
         error:
-          "You don't have active listing credits. Please subscribe or use referral credits to list properties.",
+          "Subscription expired. Please subscribe or refer a friend to list properties.",
       });
     }
 
-    // ✅ FIXED: Handle file uploads safely
+    // 5. Handle Images
     let imageUrls = [];
-
-    // Check multiple files
     if (req.files && req.files.length > 0) {
-      console.log(`📸 Found ${req.files.length} files in req.files`);
       try {
         const uploadPromises = req.files.map((file) =>
           cloudinary.uploader.upload(file.path, {
@@ -105,100 +94,76 @@ exports.createProperty = async (req, res) => {
             ],
           })
         );
-
         const uploadResults = await Promise.all(uploadPromises);
         imageUrls = uploadResults.map((result) => result.secure_url);
-        console.log("✅ Property photos uploaded to Cloudinary:", imageUrls);
       } catch (uploadError) {
-        console.error("❌ Property photo upload error:", uploadError);
+        console.error("Image upload error:", uploadError);
         return res.status(400).json({
           success: false,
-          error: `Failed to upload property photos: ${uploadError.message}`,
+          error: "Failed to upload images",
         });
       }
-    }
-    // Check single file
-    else if (req.file) {
-      console.log("📸 Found single file in req.file");
-      try {
-        const result = await cloudinary.uploader.upload(req.file.path, {
-          folder: "lagos-rent-help/agents/properties",
-          transformation: [
-            { width: 1500, height: 1024, crop: "fill" },
-            { quality: "auto" },
-          ],
-        });
-        imageUrls = [result.secure_url];
-        console.log("✅ Single property photo uploaded:", imageUrls[0]);
-      } catch (uploadError) {
-        console.error("❌ Single photo upload error:", uploadError);
-        return res.status(400).json({
-          success: false,
-          error: `Failed to upload property photo: ${uploadError.message}`,
-        });
-      }
-    }
-    // No files
-    else {
-      console.log("❌ No files found in req.files or req.file");
-      console.log("🔍 Available request properties:", Object.keys(req));
+    } else {
       return res.status(400).json({
         success: false,
-        error: "No images uploaded. Please upload at least one property image.",
+        error: "Please upload at least one property image.",
       });
     }
 
-    // ... rest of your code ...
-
-    // Parse amenities if it comes as JSON string
+    // 6. Parse Amenities
     let amenities = [];
     if (req.body.amenities) {
       try {
-        amenities = JSON.parse(req.body.amenities);
+        amenities =
+          typeof req.body.amenities === "string"
+            ? JSON.parse(req.body.amenities)
+            : req.body.amenities;
       } catch (err) {
-        console.warn("Invalid amenities JSON:", err.message);
         amenities = [];
       }
     }
 
-    // Normalize property data
+    // 7. Prepare Data
     const normalizedBody = {
       ...req.body,
-      amenities, // ensure it's stored as array
+      amenities,
       images: imageUrls,
       type: req.body.type || req.body.propertyType,
     };
 
+    // 8. Create Property
+    // ✅ This is the line that was crashing. It is now fixed.
     const property = new Property({
       ...normalizedBody,
-      agentId: req.agent.id,
+      agentId: agent._id, // Uses the found agent's ID
     });
 
     await property.save();
 
-    // ✅ UPDATE AGENT'S LISTINGS ARRAY
+    // 9. Update Agent
     agent.listings.push(property._id);
     await agent.save();
 
-    // Send email to agent
+    // 10. Send Email (Async)
     const user = await User.findById(req.user.id);
-
-    // We already have the agent, no need to find it again
     if (user && agent) {
-      await sendPropertyListingEmail(
+      sendPropertyListingEmail(
         { ...user.toObject(), ...agent.toObject() },
         property
-      );
+      ).catch((err) => console.error("Email sending failed:", err.message));
     }
 
     res.status(201).json({
       success: true,
       data: property,
-      message: "Property listed successfully and added to your listings",
+      message: "Property listed successfully",
     });
   } catch (error) {
     console.error("Create Property Error:", error);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
   }
 };
 exports.getProperties = async (req, res) => {
@@ -300,64 +265,83 @@ exports.getProperties = async (req, res) => {
 // GET single property
 exports.getPropertyById = async (req, res) => {
   try {
-    // Your Property model has agentId, not userId
     const property = await Property.findById(req.params.id)
-      .populate("agentId", "name phone email") // Populate agentId (which references User model)
+      .populate({
+        path: "agentId", // 1. Populate the Agent
+        select:
+          "fullName residentialAddress state city idPhoto whatsappNumber verificationStatus userId",
+        populate: {
+          path: "userId", // 2. Inside Agent, Populate the User
+          select: "name email phone avatar",
+          strictPopulate: false, // 👈 Safety flag
+        },
+      })
       .lean();
 
     if (!property) {
-      return res.status(404).json({
-        success: false,
-        error: "Property not found",
-      });
+      return res
+        .status(404)
+        .json({ success: false, error: "Property not found" });
     }
 
-    // Check if property has an agent assigned
-    if (!property.agentId) {
-      return res.status(400).json({
-        success: false,
-        error: "This property has no assigned agent",
-      });
+    // DEBUG: Check what we actually got
+    // console.log("Populated Property Agent:", property.agentId);
+
+    const agentProfile = property.agentId;
+
+    if (!agentProfile) {
+      return res
+        .status(400)
+        .json({ success: false, error: "This property has no assigned agent" });
     }
 
-    // FIXED: Find agent profile using the agentId (which is actually the user ID)
-    const agent = await Agent.findOne({ userId: property.agentId._id })
-      .select(
-        "idPhoto verificationStatus whatsappNumber totalViews bio experience rating totalReviews"
-      )
-      .lean();
+    const loggedInUser = req.user ? req.user._id.toString() : null;
 
-    // Increment views
-    await Property.findByIdAndUpdate(req.params.id, {
-      $inc: { views: 1 },
-    });
+    const agentUserId =
+      agentProfile.userId && agentProfile.userId._id
+        ? agentProfile.userId._id.toString()
+        : agentProfile.userId
+        ? agentProfile.userId.toString()
+        : null;
 
-    if (agent) {
-      await Agent.findByIdAndUpdate(agent._id, {
+    const isOwner = loggedInUser && agentUserId && loggedInUser === agentUserId;
+
+    // 4. Increment views only if it's NOT the owner
+    if (!isOwner) {
+      await Property.findByIdAndUpdate(req.params.id, { $inc: { views: 1 } });
+
+      // Update Agent total views
+      await Agent.findByIdAndUpdate(agentProfile._id, {
         $inc: { totalViews: 1 },
       });
     }
-
-    const responseData = {
-      ...property,
-      agent: agent
-        ? {
-            ...property.agent,
-            agentId: agent._id, // Include the agent document ID
-            verificationStatus: agent.verificationStatus,
-          }
-        : null,
+    // Format the data for the frontend
+    const formattedAgent = {
+      _id: agentProfile._id,
+      // Try to get name from Agent Profile first (fullName), fallback to User (name)
+      name:
+        agentProfile.fullName ||
+        (agentProfile.userId ? agentProfile.userId.name : "Agent"),
+      email: agentProfile.userId ? agentProfile.userId.email : "",
+      phone: agentProfile.userId ? agentProfile.userId.phone : "",
+      whatsapp: agentProfile.whatsappNumber,
+      photo: agentProfile.idPhoto,
+      verificationStatus: agentProfile.verificationStatus,
+      state: agentProfile.state,
+      city: agentProfile.city,
     };
+
     res.json({
       success: true,
-      data: responseData,
+      data: {
+        ...property,
+        agent: formattedAgent,
+        agentId: agentProfile._id,
+      },
     });
   } catch (error) {
     console.error("Error fetching property:", error);
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 };
 const { cloudinary } = require("../config/cloudinary");
@@ -366,8 +350,11 @@ exports.updateProperty = async (req, res) => {
   try {
     const { id } = req.params;
 
+    // Safety check for req.body
+    const body = req.body || {};
+
     console.log("🔄 Starting property update for ID:", id);
-    console.log("Request body:", req.body);
+    console.log("Request body:", body);
     console.log("Files:", req.files ? req.files.length : 0);
 
     // 1. Find the property
@@ -379,30 +366,31 @@ exports.updateProperty = async (req, res) => {
       });
     }
 
-    console.log("📋 Found property:", {
-      id: property._id,
-      title: property.title,
-      amenities: property.amenities,
-      amenitiesType: typeof property.amenities,
-      isArray: Array.isArray(property.amenities),
-    });
+    // 2. ✅ FIX: Find the Agent Profile first using req.user.id
+    // req.agent is undefined, so we must fetch it from the database
+    const agent = await Agent.findOne({ userId: req.user.id });
 
-    // 2. Check authorization
-    if (property.agentId.toString() !== req.user.id) {
+    if (!agent) {
+      return res.status(403).json({
+        success: false,
+        error: "Agent profile not found. You cannot update properties.",
+      });
+    }
+
+    // 3. ✅ FIX: Check Authorization
+    // Compare Property's Agent ID vs Found Agent's ID
+    if (property.agentId.toString() !== agent._id.toString()) {
       return res.status(403).json({
         success: false,
         error: "You are not authorized to update this property",
       });
     }
 
-    // 3. Upload new images if provided
+    // 4. Upload new images if provided
     let newImages = [];
     if (req.files && req.files.length > 0) {
       try {
-        console.log(`📁 Processing ${req.files.length} files for upload...`);
-
         const uploadPromises = req.files.map((file) => {
-          console.log(`📁 Processing file: ${file.originalname}`);
           return cloudinary.uploader.upload(file.path, {
             folder: "lagos-rent-help/agents/properties",
             transformation: [
@@ -414,9 +402,7 @@ exports.updateProperty = async (req, res) => {
 
         const uploaded = await Promise.all(uploadPromises);
         newImages = uploaded.map((img) => img.secure_url);
-        console.log(`✅ Successfully uploaded ${newImages.length} images`);
       } catch (err) {
-        console.error("Image upload error:", err);
         return res.status(400).json({
           success: false,
           error: `Failed to upload images: ${err.message}`,
@@ -424,67 +410,53 @@ exports.updateProperty = async (req, res) => {
       }
     }
 
-    // 4. Handle amenities safely with proper fallbacks
+    // 5. Handle amenities safely
     let amenities = property.amenities;
-    if (req.body.amenities) {
+    if (body.amenities) {
       try {
-        amenities = JSON.parse(req.body.amenities);
-      } catch {
+        amenities =
+          typeof body.amenities === "string"
+            ? JSON.parse(body.amenities)
+            : body.amenities;
+      } catch (e) {
+        console.error("Error parsing amenities:", e);
         amenities = property.amenities;
       }
     }
 
-    console.log("🏠 Final amenities to save:", amenities);
-
-    // 5. Handle totalPackagePrice - ensure it's a number, not an array
+    // 6. Handle totalPackagePrice
     let totalPackagePrice = property.totalPackagePrice || 0;
-    if (req.body.totalPackagePrice) {
-      // If it's an array, take the first value
-      if (Array.isArray(req.body.totalPackagePrice)) {
-        totalPackagePrice = Number(req.body.totalPackagePrice[0]) || 0;
+    if (body.totalPackagePrice) {
+      if (Array.isArray(body.totalPackagePrice)) {
+        totalPackagePrice = Number(body.totalPackagePrice[0]) || 0;
       } else {
-        totalPackagePrice = Number(req.body.totalPackagePrice) || 0;
+        totalPackagePrice = Number(body.totalPackagePrice) || 0;
       }
     }
 
-    // 6. Build updated fields safely with proper type conversion and fallbacks
     const updates = {
-      title: req.body.title ?? property.title,
-      description: req.body.description ?? property.description,
-      price: req.body.price ? Number(req.body.price) : property.price,
+      title: body.title || property.title,
+      description: body.description || property.description,
+      price: body.price ? Number(body.price) : property.price,
       totalPackagePrice: totalPackagePrice,
-      bedrooms: req.body.bedrooms
-        ? Number(req.body.bedrooms)
-        : property.bedrooms || 0,
-      bathrooms: req.body.bathrooms
-        ? Number(req.body.bathrooms)
-        : property.bathrooms || 0,
-      location: req.body.location ?? property.location,
-      type: req.body.type ?? property.type,
-      status: req.body.status ?? property.status,
-      amenities,
-      images: newImages.length > 0 ? newImages : property.images || [],
+      bedrooms: body.bedrooms ? Number(body.bedrooms) : property.bedrooms,
+      bathrooms: body.bathrooms ? Number(body.bathrooms) : property.bathrooms,
+      location: body.location || property.location,
+      type: body.type || property.type,
+      status: body.status || property.status,
+      amenities: amenities,
+      // Keep old images and add new ones
+      images: [...property.images, ...newImages],
     };
 
-    // 7. Remove undefined values to avoid overwriting with undefined
+    // 7. Apply changes
     Object.keys(updates).forEach((key) => {
-      if (updates[key] === undefined) {
-        delete updates[key];
+      if (updates[key] !== undefined) {
+        property[key] = updates[key];
       }
     });
 
-    console.log("🔄 Applying updates:", updates);
-
-    // 8. Apply changes directly to the Mongoose document
-    Object.keys(updates).forEach((key) => {
-      property[key] = updates[key];
-    });
-
-    // 9. Validate and save
-    await property.validate(); // This will trigger Mongoose validation
     await property.save();
-
-    console.log("✅ Property updated successfully");
 
     res.json({
       success: true,

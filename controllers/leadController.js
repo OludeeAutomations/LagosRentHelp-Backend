@@ -1,6 +1,8 @@
 const Lead = require("../models/Lead");
 const Agent = require("../models/Agent");
+const Property = require("../models/Property"); // Assuming you might need to check if property exists
 
+// 1. Create a Lead
 exports.createLead = async (req, res) => {
   try {
     const { agentId, type, propertyId } = req.body;
@@ -23,17 +25,28 @@ exports.createLead = async (req, res) => {
       });
     }
 
-    // Check if lead already exists
-    const existingLead = await Lead.findOne({
+    // ✅ FIXED: Check uniqueness based on User + Agent + Property (if property exists)
+    // This allows a user to contact the same agent for DIFFERENT properties.
+    const duplicateCheck = {
       agentId,
       userId,
-    });
+      // If propertyId is provided, check specifically for this property.
+      // If not provided (general inquiry), check where propertyId is null
+      propertyId: propertyId || null,
+    };
+
+    const existingLead = await Lead.findOne(duplicateCheck);
 
     if (existingLead) {
+      // Update the timestamp of the existing lead instead of creating a new one
+      existingLead.timestamp = new Date();
+      existingLead.message = `${type.toUpperCase()} contact re-initiated`;
+      await existingLead.save();
+
       return res.status(200).json({
         success: true,
         data: existingLead,
-        message: "Lead already exists",
+        message: "Lead updated",
       });
     }
 
@@ -56,15 +69,12 @@ exports.createLead = async (req, res) => {
       { new: true }
     );
 
-    console.log(
-      `Agent ${agentId} totalLeads updated to:`,
-      updatedAgent.totalLeads
-    );
+    // console.log(`Agent ${agentId} totalLeads updated to:`, updatedAgent.totalLeads);
 
     res.status(201).json({
       success: true,
       data: lead,
-      agentTotalLeads: updatedAgent.totalLeads, // Optional: return updated count
+      agentTotalLeads: updatedAgent.totalLeads,
     });
   } catch (error) {
     console.error("Error creating lead:", error);
@@ -74,25 +84,28 @@ exports.createLead = async (req, res) => {
     });
   }
 };
-// Check if user has contacted an agent
+
+// 2. Check if user has contacted an agent (Specific to Property)
 exports.checkLead = async (req, res) => {
   try {
     const { agentId } = req.params;
+    const { propertyId } = req.query; // ✅ Accept propertyId from query params
     const userId = req.user.id;
 
-    console.log("Checking lead for:", { agentId, userId });
+    // Build the query
+    const query = { agentId, userId };
 
-    // Check if lead already exists for this user-agent combination
-    const existingLead = await Lead.findOne({
-      agentId,
-      userId,
-    });
+    // If checking for a specific property, include it in query
+    if (propertyId) {
+      query.propertyId = propertyId;
+    }
 
-    console.log("Existing lead found:", existingLead);
+    const existingLead = await Lead.findOne(query);
 
     res.json({
       success: true,
       hasContacted: !!existingLead,
+      lastContacted: existingLead ? existingLead.timestamp : null,
     });
   } catch (error) {
     console.error("Error checking lead:", error);
@@ -102,7 +115,8 @@ exports.checkLead = async (req, res) => {
     });
   }
 };
-// Get leads with optional filters
+
+// 3. Get Leads (For Users viewing their history OR Admins)
 exports.getLeads = async (req, res) => {
   try {
     const {
@@ -113,37 +127,48 @@ exports.getLeads = async (req, res) => {
       page = 1,
       limit = 10,
     } = req.query;
-    const userId = req.user.id; // From auth middleware
 
-    console.log("Fetching leads with filters:", req.query);
+    const userId = req.user.id;
 
     // Build filter object
     const filter = {};
 
-    // If user is an agent, they can only see their own leads
-    if (agentId) {
-      filter.agentId = agentId;
-    }
+    // ✅ SECURITY: If the user is a normal 'user', they should only see leads THEY created.
+    // If the user is 'admin', they can see everything.
+    // If the user is 'agent', they should use the 'getAgentLeads' endpoint usually,
+    // but if they use this one, we restrict to their own leads.
 
-    // Optional filters
+    if (req.user.role === "user") {
+      filter.userId = userId;
+    } else if (req.user.role === "agent") {
+      // Find the agent profile for this user
+      const agentProfile = await Agent.findOne({ userId: userId });
+      if (agentProfile) {
+        filter.agentId = agentProfile._id;
+      } else {
+        return res
+          .status(404)
+          .json({ success: false, error: "Agent profile not found" });
+      }
+    }
+    // Admins can pass filter.agentId manually
+
+    if (agentId && req.user.role === "admin") filter.agentId = agentId;
     if (propertyId) filter.propertyId = propertyId;
     if (type) filter.type = type;
     if (status) filter.status = status;
 
-    // Calculate pagination
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
 
-    // Get leads with population
     const leads = await Lead.find(filter)
-      .populate("userId", "name email phone") // Populate client info
-      .populate("propertyId", "title location price images") // Populate property info
-      .sort({ timestamp: -1 }) // Newest first
+      .populate("userId", "name email phone avatar")
+      .populate("propertyId", "title location price images type")
+      .sort({ timestamp: -1 })
       .skip(skip)
       .limit(limitNum);
 
-    // Get total count for pagination
     const total = await Lead.countDocuments(filter);
     const totalPages = Math.ceil(total / limitNum);
 
@@ -155,8 +180,6 @@ exports.getLeads = async (req, res) => {
         limit: limitNum,
         total,
         totalPages,
-        hasNext: pageNum < totalPages,
-        hasPrev: pageNum > 1,
       },
     });
   } catch (error) {
@@ -167,32 +190,39 @@ exports.getLeads = async (req, res) => {
     });
   }
 };
-// Get leads for a specific agent
+
+// 4. Get Leads SPECIFICALLY for the logged-in Agent
 exports.getAgentLeads = async (req, res) => {
   try {
-    const { agentId } = req.params;
     const { page = 1, limit = 10, type } = req.query;
+    const userId = req.user.id;
 
-    console.log("Fetching leads for agent:", agentId);
+    // ✅ SECURITY: Find the agent profile associated with the logged-in User
+    const agent = await Agent.findOne({ userId: userId });
 
-    // Build filter
-    const filter = { agentId };
+    if (!agent) {
+      return res.status(403).json({
+        success: false,
+        error: "You do not have an agent profile.",
+      });
+    }
+
+    // Build filter using the securely found agent._id
+    const filter = { agentId: agent._id };
+
     if (type) filter.type = type;
 
-    // Calculate pagination
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
 
-    // Get leads
     const leads = await Lead.find(filter)
-      .populate("userId", "name email phone")
-      .populate("propertyId", "title location price images")
+      .populate("userId", "name email phone avatar")
+      .populate("propertyId", "title location price images type")
       .sort({ timestamp: -1 })
       .skip(skip)
       .limit(limitNum);
 
-    // Get total count
     const total = await Lead.countDocuments(filter);
     const totalPages = Math.ceil(total / limitNum);
 

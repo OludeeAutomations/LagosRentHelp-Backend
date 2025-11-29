@@ -2,7 +2,6 @@ const Review = require("../models/Review");
 const Property = require("../models/Property");
 const Agent = require("../models/Agent");
 
-
 exports.createReview = async (req, res) => {
   try {
     const { propertyId, rating, comment } = req.body;
@@ -59,11 +58,10 @@ exports.getPropertyReviews = async (req, res) => {
   }
 };
 
-
 // POST - Add a new review for an agent
 exports.createAgentReview = async (req, res) => {
   try {
-    const { rating, comment,agentId } = req.body;
+    const { rating, comment, agentId } = req.body;
     const reviewerId = req.user.id; // from auth middleware
 
     if (!rating || !comment) {
@@ -127,10 +125,18 @@ exports.createAgentReview = async (req, res) => {
 // GET - Fetch all reviews for an agent
 exports.getAgentReviews = async (req, res) => {
   try {
-    const {agentId} = req.query;
+    const { agentId } = req.query;
 
-    const agent = await Agent.findOne({userId:agentId})
-      .populate("reviews.reviewerId", "name profilePhoto email")
+    if (!agentId) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Agent ID is required" });
+    }
+
+    // ✅ FIXED: Pass the ID string directly, not an object
+    const agent = await Agent.findById(agentId)
+      // Ensure 'avatar' matches your User schema field (prev code used avatar)
+      .populate("reviews.reviewerId", "name avatar email")
       .select("reviews rating totalReviews");
 
     if (!agent) {
@@ -156,4 +162,3 @@ exports.getAgentReviews = async (req, res) => {
     });
   }
 };
-

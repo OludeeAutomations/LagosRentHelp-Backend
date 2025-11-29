@@ -134,14 +134,8 @@ const agentSchema = new mongoose.Schema(
       type: {
         status: {
           type: String,
-          enum: [
-            "pending_verification",
-            "trial",
-            "active",
-            "expired",
-            "cancelled",
-          ],
-          default: "pending_verification",
+          enum: ["trial", "active", "expired", "cancelled"],
+          default: "trial",
         },
         trialStartsAt: Date,
         trialEndsAt: Date,
@@ -159,8 +153,8 @@ const agentSchema = new mongoose.Schema(
 
     subscriptionPlan: {
       type: String,
-      enum: ["basic", "premium"],
-      default: "basic",
+      enum: ["trial", "basic", "premium"],
+      default: "trial",
     },
     subscriptionExpiry: Date,
 
@@ -275,90 +269,73 @@ agentSchema.virtual("trialDaysLeft").get(function () {
   return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 });
 
-//agentSchema.pre("save", function (next) {
-//  // Update lastActive timestamp
-//  if (this.isModified()) {
-//    this.lastActive = new Date();
-//  }
-//
-//  // Start trial when agent gets verified
-//  if (
-//    this.isModified("verificationStatus") &&
-//    this.verificationStatus === "verified" &&
-//    this.subscription.status === "pending_verification"
-//  ) {
-//    const now = new Date();
-//    const trialEnds = new Date(now);
-//    trialEnds.setMonth(trialEnds.getMonth() + 6); // 6 months trial
-//
-//    this.subscription = {
-//      status: "trial",
-//      trialStartsAt: now,
-//      trialEndsAt: trialEnds,
-//      plan: "trial",
-//      stripeCustomerId: this.subscription.stripeCustomerId,
-//      stripeSubscriptionId: this.subscription.stripeSubscriptionId,
-//    };
-//
-//    console.log(
-//      `Started free trial for agent ${
-//        this._id
-//      } until ${trialEnds.toLocaleDateString()}`
-//    );
-//  }
-//  next();
-//});
-//
-//// Compute average rating & total reviews before saving
-//agentSchema.pre("save", function (next) {
-//  if (this.isModified("reviews")) {
-//    const totalReviews = this.reviews.length;
-//
-//    if (totalReviews > 0) {
-//      const avgRating =
-//        this.reviews.reduce((sum, review) => sum + review.rating, 0) /
-//        totalReviews;
-//
-//      this.totalReviews = totalReviews;
-//      this.rating = Math.round(avgRating * 10) / 10; // round to 1 decimal
-//    } else {
-//      // If no reviews, reset stats
-//      this.totalReviews = 0;
-//      this.rating = 0;
-//    }
-//  }
-//
-//  next();
-//});
-//
-//// Method to generate unique referral code
+agentSchema.pre("save", function (next) {
+  // 1. Update lastActive timestamp
+  if (this.isModified()) {
+    this.lastActive = new Date();
+  }
 
-// Method to check if agent can list properties
+  // 2. TRIGGER: When Agent is finally VERIFIED
+  if (
+    this.isModified("verificationStatus") &&
+    this.verificationStatus === "verified"
+  ) {
+    console.log(`✅ Verifying agent ${this._id}. Starting Trial Logic...`);
+
+    const now = new Date();
+    const trialEnds = new Date(now);
+
+    // ✅ A. Add the standard 6 Months Free Trial
+    trialEnds.setMonth(trialEnds.getMonth() + 6);
+    console.log("Standard 6 months applied.");
+
+    // ✅ B. Check if this agent was referred by someone
+    // If 'referredBy' exists, they get +1 Week (7 days) added to their trial
+    if (this.referredBy) {
+      trialEnds.setDate(trialEnds.getDate() + 7);
+      console.log("🎁 Referral detected! Added +1 extra week to trial.");
+    }
+
+    // ✅ C. Update the subscription object
+    this.subscription = {
+      status: "trial",
+      trialStartsAt: now,
+      trialEndsAt: trialEnds,
+      plan: "trial",
+      stripeCustomerId: this.subscription?.stripeCustomerId,
+      stripeSubscriptionId: this.subscription?.stripeSubscriptionId,
+    };
+
+    // Optional: Sync freeListingWeeks if you use that for logic elsewhere
+    // But usually, the date range (trialEndsAt) is enough.
+  }
+
+  next();
+});
+
 agentSchema.methods.canListProperties = function () {
   const now = new Date();
 
-  // If not verified, can't list
+  // 1. Must be verified
   if (this.verificationStatus !== "verified") {
     return false;
   }
 
-  // If they have free weeks from referrals
-  if (this.freeListingWeeks > 0) {
-    return true;
-  }
-
-  // If trial period is active
+  // 2. Check Subscription Trial Dates (This handles the 6 months + 1 week)
   if (
     this.subscription.status === "trial" &&
-    this.subscription.trialStartsAt &&
     this.subscription.trialEndsAt &&
-    now >= this.subscription.trialStartsAt &&
-    now <= this.subscription.trialEndsAt
+    now <= this.subscription.trialEndsAt // Check if today is before the end date
   ) {
     return true;
   }
 
-  // If paid subscription is active
+  // 3. Check for specific "Free Weeks" counter (Manual rewards)
+  if (this.freeListingWeeks > 0) {
+    return true;
+  }
+
+  // 4. Check Paid Active Plan
   if (
     this.subscription.status === "active" &&
     this.subscription.currentPeriodEnd &&

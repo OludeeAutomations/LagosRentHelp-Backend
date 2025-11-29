@@ -32,7 +32,7 @@ const propertySchema = new mongoose.Schema(
     images: [{ type: String }],
     agentId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+      ref: "Agent",
       required: true,
     },
     status: {
