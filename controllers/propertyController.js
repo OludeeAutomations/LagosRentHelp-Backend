@@ -2,45 +2,11 @@ const Property = require("../models/Property");
 const User = require("../models/User");
 const Agent = require("../models/Agent");
 const { sendPropertyListingEmail } = require("../services/emailService");
+const { cloudinary } = require("../config/cloudinary");
 
-const canAgentListPropertiesBackend = async (agent) => {
-  const now = new Date();
-
-  // 1. Check free listing weeks
-  if (agent.freeListingWeeks > 0) {
-    return true;
-  }
-
-  // 2. Check subscription status
-  if (
-    agent.subscription?.status === "active" &&
-    agent.subscription.currentPeriodEnd
-  ) {
-    const periodEnd = new Date(agent.subscription.currentPeriodEnd);
-    return now <= periodEnd;
-  }
-
-  // 3. Check trial period
-  if (
-    agent.subscription?.status === "trial" &&
-    agent.subscription.trialEndsAt
-  ) {
-    const trialEnds = new Date(agent.subscription.trialEndsAt);
-    return now <= trialEnds;
-  }
-
-  // 4. Check grace period (7 days from verification)
-  const verifiedAt = agent.verifiedAt || agent.verificationData?.verifiedAt;
-  if (verifiedAt) {
-    const verifiedDate = new Date(verifiedAt);
-    const sevenDaysLater = new Date(
-      verifiedDate.getTime() + 7 * 24 * 60 * 60 * 1000
-    );
-    return now <= sevenDaysLater;
-  }
-
-  return false;
-};
+/**
+ * Backend authorization logic for agent listing permissions
+ */
 
 exports.createProperty = async (req, res) => {
   try {
@@ -344,7 +310,6 @@ exports.getPropertyById = async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 };
-const { cloudinary } = require("../config/cloudinary");
 
 exports.updateProperty = async (req, res) => {
   try {
@@ -410,16 +375,15 @@ exports.updateProperty = async (req, res) => {
       }
     }
 
-    // 5. Handle amenities safely
-    let amenities = property.amenities;
-    if (body.amenities) {
+    // 4. Handle amenities safely with proper fallbacks
+    let amenities = Array.isArray(property.amenities) ? property.amenities : [];
+    if (req.body.amenities) {
       try {
-        amenities =
-          typeof body.amenities === "string"
-            ? JSON.parse(body.amenities)
-            : body.amenities;
-      } catch (e) {
-        console.error("Error parsing amenities:", e);
+        const parsed = JSON.parse(req.body.amenities);
+        if (Array.isArray(parsed)) {
+          amenities = parsed;
+        }
+      } catch {
         amenities = property.amenities;
       }
     }
@@ -506,6 +470,51 @@ exports.deactivateProperty = async (req, res) => {
   } catch (error) {
     console.error("Deactivate Property Error:", error);
     res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+};
+
+exports.deleteProperty = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const property = await Property.findById(id);
+
+    if (!property) {
+      return res.status(404).json({
+        success: false,
+        error: "Property not found",
+      });
+    }
+
+    if (property.agentId.toString() !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        error: "You are not authorized to delete this property",
+      });
+    }
+
+    if (property.images && property.images.length > 0) {
+      const deletePromises = property.images.map((imageUrl) => {
+        const publicId = imageUrl.split("/").slice(-2).join("/").split(".")[0]; // extract folder/file without extension
+
+        return cloudinary.uploader.destroy(publicId);
+      });
+
+      await Promise.all(deletePromises);
+    }
+
+    await Property.findByIdAndDelete(id);
+
+    return res.json({
+      success: true,
+      message: "Property deleted successfully",
+    });
+  } catch (error) {
+    console.error("Delete Property Error:", error);
+    return res.status(500).json({
       success: false,
       error: error.message,
     });
