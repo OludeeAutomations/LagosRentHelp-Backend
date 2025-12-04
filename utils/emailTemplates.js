@@ -193,7 +193,7 @@ const getPropertyListingEmailTemplate = (agent, property) => {
             <div class="property-details">
               <h3>${property.title}</h3>
               <p><strong>Location:</strong> ${property.location}</p>
-              <p><strong>Price:</strong> $${property.price.toLocaleString()}</p>
+              <p><strong>Price:</strong>₦${property.price.toLocaleString()}</p>
               <p><strong>Type:</strong> ${property.type}</p>
               <p><strong>Bedrooms:</strong> ${property.bedrooms}</p>
               <p><strong>Bathrooms:</strong> ${property.bathrooms}</p>
