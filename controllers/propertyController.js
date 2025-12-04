@@ -319,7 +319,7 @@ exports.updateProperty = async (req, res) => {
     const body = req.body || {};
 
     console.log("🔄 Starting property update for ID:", id);
-    console.log("Request body:", body);
+    console.log("Request body keys:", Object.keys(body));
     console.log("Files:", req.files ? req.files.length : 0);
 
     // 1. Find the property
@@ -331,10 +331,8 @@ exports.updateProperty = async (req, res) => {
       });
     }
 
-    // 2. ✅ FIX: Find the Agent Profile first using req.user.id
-    // req.agent is undefined, so we must fetch it from the database
+    // 2. Find the Agent Profile
     const agent = await Agent.findOne({ userId: req.user.id });
-
     if (!agent) {
       return res.status(403).json({
         success: false,
@@ -342,8 +340,7 @@ exports.updateProperty = async (req, res) => {
       });
     }
 
-    // 3. ✅ FIX: Check Authorization
-    // Compare Property's Agent ID vs Found Agent's ID
+    // 3. Check Authorization
     if (property.agentId.toString() !== agent._id.toString()) {
       return res.status(403).json({
         success: false,
@@ -351,7 +348,66 @@ exports.updateProperty = async (req, res) => {
       });
     }
 
-    // 4. Upload new images if provided
+    // 4. Parse amenities safely
+    let amenities = Array.isArray(property.amenities) ? property.amenities : [];
+    if (body.amenities) {
+      try {
+        const parsed = JSON.parse(body.amenities);
+        if (Array.isArray(parsed)) {
+          amenities = parsed;
+        }
+      } catch {
+        amenities = property.amenities;
+      }
+    }
+
+    // 5. Parse images to remove
+    let imagesToRemove = [];
+    if (body.imagesToRemove) {
+      try {
+        imagesToRemove = JSON.parse(body.imagesToRemove);
+        if (!Array.isArray(imagesToRemove)) {
+          imagesToRemove = [];
+        }
+      } catch {
+        imagesToRemove = [];
+      }
+    }
+
+    // 6. Handle images to remove from Cloudinary
+    if (imagesToRemove.length > 0) {
+      try {
+        // Extract public IDs from Cloudinary URLs
+        const publicIdsToRemove = imagesToRemove.map((url) => {
+          const parts = url.split("/");
+          const filename = parts[parts.length - 1];
+          const publicId = filename.split(".")[0];
+          return `lagos-rent-help/agents/properties/${publicId}`;
+        });
+
+        // Delete from Cloudinary in batches
+        for (const publicId of publicIdsToRemove) {
+          try {
+            await cloudinary.uploader.destroy(publicId);
+            console.log(`✅ Removed image from Cloudinary: ${publicId}`);
+          } catch (cloudinaryErr) {
+            console.error(
+              `Failed to delete image from Cloudinary: ${publicId}`,
+              cloudinaryErr
+            );
+          }
+        }
+
+        // Remove from property images array
+        property.images = property.images.filter(
+          (img) => !imagesToRemove.includes(img)
+        );
+      } catch (removeErr) {
+        console.error("Error removing images:", removeErr);
+      }
+    }
+
+    // 7. Upload new images if provided
     let newImages = [];
     if (req.files && req.files.length > 0) {
       try {
@@ -367,6 +423,11 @@ exports.updateProperty = async (req, res) => {
 
         const uploaded = await Promise.all(uploadPromises);
         newImages = uploaded.map((img) => img.secure_url);
+
+        // Clean up temporary files
+        req.files.forEach((file) => {
+          fs.unlinkSync(file.path);
+        });
       } catch (err) {
         return res.status(400).json({
           success: false,
@@ -375,20 +436,7 @@ exports.updateProperty = async (req, res) => {
       }
     }
 
-    // 4. Handle amenities safely with proper fallbacks
-    let amenities = Array.isArray(property.amenities) ? property.amenities : [];
-    if (req.body.amenities) {
-      try {
-        const parsed = JSON.parse(req.body.amenities);
-        if (Array.isArray(parsed)) {
-          amenities = parsed;
-        }
-      } catch {
-        amenities = property.amenities;
-      }
-    }
-
-    // 6. Handle totalPackagePrice
+    // 8. Handle totalPackagePrice
     let totalPackagePrice = property.totalPackagePrice || 0;
     if (body.totalPackagePrice) {
       if (Array.isArray(body.totalPackagePrice)) {
@@ -398,6 +446,7 @@ exports.updateProperty = async (req, res) => {
       }
     }
 
+    // 9. Prepare updates object
     const updates = {
       title: body.title || property.title,
       description: body.description || property.description,
@@ -407,25 +456,37 @@ exports.updateProperty = async (req, res) => {
       bathrooms: body.bathrooms ? Number(body.bathrooms) : property.bathrooms,
       location: body.location || property.location,
       type: body.type || property.type,
+      listingType: body.listingType || property.listingType,
       status: body.status || property.status,
       amenities: amenities,
-      // Keep old images and add new ones
+      // Add new images to existing ones (after removing marked ones)
       images: [...property.images, ...newImages],
+      updatedAt: new Date(),
     };
 
-    // 7. Apply changes
+    // 10. Apply updates
     Object.keys(updates).forEach((key) => {
       if (updates[key] !== undefined) {
         property[key] = updates[key];
       }
     });
 
+    // 11. Save the updated property
     await property.save();
+
+    // 12. Populate agent details for response (REMOVED reviews.userId population)
+    const updatedProperty = await Property.findById(id).populate(
+      "agentId",
+      "firstName lastName email phone companyName verificationStatus"
+    );
+    // Removed: .populate('reviews.userId', 'name email'); // This was causing the error
+
+    console.log("✅ Property updated successfully");
 
     res.json({
       success: true,
       message: "Property updated successfully",
-      data: property,
+      data: updatedProperty,
     });
   } catch (error) {
     console.error("Update Property Error:", error);
@@ -435,7 +496,6 @@ exports.updateProperty = async (req, res) => {
     });
   }
 };
-// Optional: Keep deactivateProperty as a convenience function
 exports.deactivateProperty = async (req, res) => {
   try {
     const { id } = req.params;
