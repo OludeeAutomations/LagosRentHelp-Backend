@@ -419,7 +419,7 @@ exports.getAgentProfile = async (req, res) => {
 };
 exports.getLoggedInAgentProfile = async (req, res) => {
   try {
-    const agent = await Agent.findOne({ userId: req.agent.id })
+    const agent = await Agent.findOne({ userId: req.agent._id })
       .populate("agentId", "name email phone avatar role")
       .lean();
 
