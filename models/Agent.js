@@ -9,6 +9,12 @@ const agentSchema = new mongoose.Schema(
       required: true,
       unique: true,
     },
+    agentId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Agent",
+      required: true,
+      unique: true,
+    },
 
     gender: {
       type: String,

@@ -8,7 +8,8 @@ const {
   resetPassword,
   refresh,
   validateToken,
-  changePassword
+  changePassword,
+  resendVerificationEmail,
 } = require("../controllers/authController");
 const auth = require("../middleware/auth");
 
@@ -19,8 +20,10 @@ router.post("/login", login);
 router.post("/google", loginWithGoogle);
 router.post("/forgot-password", requestPasswordReset);
 router.post("/reset-password", resetPassword);
-router.post("/change-password",auth, changePassword);
+router.post("/change-password", auth, changePassword);
 router.get("/verify-email/:userId/:token", verifyEmail);
+router.post("/resend-verification", resendVerificationEmail);
+
 router.post("/refresh", refresh);
 router.get("/validate", auth, validateToken);
 

@@ -276,7 +276,6 @@ exports.login = async (req, res) => {
   }
 };
 
-
 exports.loginWithGoogle = async (req, res) => {
   try {
     const { idToken } = req.body;
@@ -295,12 +294,7 @@ exports.loginWithGoogle = async (req, res) => {
 
     const payload = ticket.getPayload();
 
-    const {
-      email,
-      name,
-      picture: avatar,
-      sub: googleId,
-    } = payload;
+    const { email, name, picture: avatar, sub: googleId } = payload;
 
     if (!email) {
       return res.status(400).json({
@@ -355,7 +349,6 @@ exports.loginWithGoogle = async (req, res) => {
       user: safeUser,
       ...(agentData && { agentData }),
     });
-
   } catch (error) {
     console.error("Google login error:", error);
     return res.status(500).json({
@@ -364,7 +357,6 @@ exports.loginWithGoogle = async (req, res) => {
     });
   }
 };
-
 
 exports.verifyEmail = async (req, res) => {
   try {
@@ -421,6 +413,75 @@ exports.verifyEmail = async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message,
+    });
+  }
+};
+
+// Add this inside authController.js
+
+exports.resendVerificationEmail = async (req, res) => {
+  try {
+    // We accept either userId or email to find the user
+    const { userId, email } = req.body;
+
+    let user;
+
+    if (userId) {
+      user = await User.findById(userId);
+    } else if (email) {
+      user = await User.findOne({ email });
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: "User ID or Email is required",
+      });
+    }
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found",
+      });
+    }
+
+    // 1. Check if already verified
+    if (user.emailVerified) {
+      return res.status(400).json({
+        success: false,
+        error: "This account is already verified. Please login.",
+      });
+    }
+
+    // 2. Generate a NEW verification token
+    const verificationToken = crypto.randomBytes(16).toString("hex");
+
+    // 3. Update the user record
+    user.verification = {
+      token: verificationToken,
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000), // Expires in 10 minutes
+    };
+
+    await user.save();
+
+    // 4. Construct the URL
+    const verificationUrl = `${frontEndUrl}/verify-email/${user._id}/${verificationToken}`;
+
+    // 5. Send the email
+    await sendVerificationEmail({
+      verificationLink: verificationUrl,
+      name: user.name,
+      email: user.email,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Verification link sent successfully. Please check your email.",
+    });
+  } catch (error) {
+    console.error("Resend verification error:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to resend verification email",
     });
   }
 };
@@ -527,7 +588,6 @@ exports.resetPassword = async (req, res) => {
   }
 };
 
-
 exports.changePassword = async (req, res) => {
   try {
     const userId = req.user._id; // from auth middleware
@@ -582,7 +642,7 @@ exports.changePassword = async (req, res) => {
     user.tokenVersion += 1;
 
     await user.save();
-    await sendResetPasswordSuccessEmail(user)
+    await sendResetPasswordSuccessEmail(user);
 
     return res.status(200).json({
       success: true,
@@ -596,7 +656,6 @@ exports.changePassword = async (req, res) => {
     });
   }
 };
-
 
 exports.refresh = async (req, res) => {
   const token = req.cookies.refreshToken;
