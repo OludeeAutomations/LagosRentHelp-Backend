@@ -9,6 +9,7 @@ const { cloudinary } = require("../config/cloudinary");
  */
 
 exports.createProperty = async (req, res) => {
+
   try {
     // 1. Check User Auth
     if (!req.user || req.user.role !== "agent") {
@@ -20,6 +21,8 @@ exports.createProperty = async (req, res) => {
 
     // 2. Find Agent Profile
     const agent = await Agent.findOne({ userId: req.user.id });
+
+  
 
     if (!agent) {
       return res.status(403).json({
@@ -89,6 +92,12 @@ exports.createProperty = async (req, res) => {
       }
     }
 
+    console.log("AGENT DEBUG:", {
+      agentId: agent._id,
+      agentExists: !!agent,
+    });
+
+
     // 7. Prepare Data
     const normalizedBody = {
       ...req.body,
@@ -101,7 +110,7 @@ exports.createProperty = async (req, res) => {
     // ✅ This is the line that was crashing. It is now fixed.
     const property = new Property({
       ...normalizedBody,
-      agentId: agent._id, // Uses the found agent's ID
+      agentId: agent._id,
     });
 
     await property.save();
@@ -541,7 +550,6 @@ exports.deleteProperty = async (req, res) => {
     const { id } = req.params;
 
     const property = await Property.findById(id);
-
     if (!property) {
       return res.status(404).json({
         success: false,
@@ -549,16 +557,30 @@ exports.deleteProperty = async (req, res) => {
       });
     }
 
-    if (property.agentId.toString() !== req.user.id) {
+    const agent = await Agent.findOne({ userId: req.user.id });
+    if (!agent) {
+      return res.status(403).json({
+        success: false,
+        error: "Agent profile not found",
+      });
+    }
+
+    // ✅ Authorization check
+    if (property.agentId.toString() !== agent._id.toString()) {
       return res.status(403).json({
         success: false,
         error: "You are not authorized to delete this property",
       });
     }
 
-    if (property.images && property.images.length > 0) {
+    // ✅ Delete images from Cloudinary
+    if (property.images?.length) {
       const deletePromises = property.images.map((imageUrl) => {
-        const publicId = imageUrl.split("/").slice(-2).join("/").split(".")[0]; // extract folder/file without extension
+        const publicId = imageUrl
+          .split("/")
+          .slice(-2)
+          .join("/")
+          .split(".")[0];
 
         return cloudinary.uploader.destroy(publicId);
       });
