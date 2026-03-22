@@ -3,12 +3,14 @@ const Notification = require("../models/Notification");
 exports.getNotifications = async (req, res) => {
   try {
     const { page = 1, limit = 10 } = req.query;
-    const notifications = await Notification.find({ agentId: req.agent.id })
+    const userId = req.user.id;
+
+    const notifications = await Notification.find({ userId })
       .sort({ createdAt: -1 })
       .limit(limit * 1)
       .skip((page - 1) * limit);
 
-    const total = await Notification.countDocuments({ agentId: req.agent.id });
+    const total = await Notification.countDocuments({ userId });
 
     res.json({
       success: true,
@@ -33,7 +35,7 @@ exports.markAsRead = async (req, res) => {
     const notification = await Notification.findByIdAndUpdate(
       req.params.id,
       { isRead: true },
-      { new: true }
+      { new: true },
     );
 
     res.json({

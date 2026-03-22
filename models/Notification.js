@@ -4,7 +4,7 @@ const notificationSchema = new mongoose.Schema(
   {
     userId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Agent",
+      ref: "User",
       required: true,
     },
     type: {
@@ -45,7 +45,7 @@ const notificationSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 module.exports = mongoose.model("Notification", notificationSchema);

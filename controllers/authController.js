@@ -1,5 +1,4 @@
 const User = require("../models/User");
-const Agent = require("../models/Agent");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
@@ -16,7 +15,7 @@ const createAccessToken = (user) => {
   return jwt.sign(
     { userId: user._id, tokenVersion: user.tokenVersion },
     process.env.ACCESS_TOKEN_SECRET,
-    { expiresIn: "15m" }
+    { expiresIn: "15m" },
   );
 };
 
@@ -24,100 +23,16 @@ const createRefreshToken = (user) => {
   return jwt.sign(
     { userId: user._id, tokenVersion: user.tokenVersion },
     process.env.REFRESH_TOKEN_SECRET,
-    { expiresIn: "7d" }
+    { expiresIn: "7d" },
   );
 };
 
 const backEndUrl = process.env.BACKEND_URL;
 const frontEndUrl = process.env.FRONTEND_URL;
-/*exports.register = async (req, res) => {
-  try {
-    const { name, email, phone, password, role, ...agentData } = req.body;
-
-    if (!name || !email || !password || !phone) {
-      return res.status(400).json({
-        success: false,
-        error: "Fill in the required information",
-      });
-    }
-
-    // Check for existing user
-    const existingUser = await User.findOne({ $or: [{ email }, { phone }] });
-    if (existingUser) {
-      return res.status(409).json({
-        success: false,
-        error: "User with this email or phone already exists",
-      });
-    }
-
-    const verificationToken = crypto.randomBytes(16).toString("hex");
-
-    const user = new User({
-      name,
-      email,
-      phone,
-      password,
-      role: role || "user",
-      verification: {
-        token: verificationToken,
-        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
-      },
-      ...agentData,
-    });
-
-    // Generate tokens before saving
-    const verificationUrl = `${frontEndUrl}/verify-email/${user._id}/${verificationToken}`;
-    const accessToken = createAccessToken(user);
-    const refreshToken = createRefreshToken(user);
-
-    // Send verification email FIRST
-    await sendVerificationEmail({
-      verificationLink: verificationUrl,
-      name: user.name,
-      email: user.email,
-    });
-
-    // Only save user if email sent successfully
-    await user.save();
-
-    console.log(verificationUrl);
-
-    res.cookie("refreshToken", refreshToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "strict",
-      path: "/api/auth/refresh",
-    });
-
-    const userResponse = user.toObject();
-    delete userResponse.password;
-    delete userResponse.verification;
-
-    res.status(201).json({
-      success: true,
-      accessToken,
-      user: userResponse,
-    });
-  } catch (error) {
-    console.error("Registration error:", error);
-    if (user && user._id) {
-      try {
-        await User.findByIdAndDelete(user._id);
-        console.log(`Rolled back user creation for: ${user.email}`);
-      } catch (deleteError) {
-        console.error("Failed to rollback user creation:", deleteError);
-      }
-    }
-    res.status(500).json({
-      success: false,
-      error: "Server error, please try again later",
-    });
-  }
-};*/
 
 exports.register = async (req, res) => {
   try {
-    const { name, email, phone, password, role, ...agentData } = req.body;
+    const { name, email, phone, password } = req.body;
 
     if (!name || !email || !password || !phone) {
       return res.status(400).json({
@@ -146,7 +61,7 @@ exports.register = async (req, res) => {
       email,
       phone,
       password,
-      role: role || "user",
+      role: "user",
       verification: {
         token: verificationToken,
         expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes from now
@@ -235,12 +150,6 @@ exports.login = async (req, res) => {
     user.lastLogin = new Date();
     await user.save();
 
-    // Fetch agent info if the user is an agent
-    let agentData = null;
-    if (user.role === "agent") {
-      agentData = await Agent.findOne({ userId: user._id });
-    }
-
     // Generate access and refresh tokens
     const accessToken = createAccessToken(user);
     const refreshToken = createRefreshToken(user);
@@ -265,7 +174,6 @@ exports.login = async (req, res) => {
       accessToken,
       expiresIn: 7 * 24 * 60 * 60,
       user: safeUser,
-      ...(agentData && { agentData }),
     });
   } catch (error) {
     console.error("Login error:", error);
@@ -321,11 +229,6 @@ exports.loginWithGoogle = async (req, res) => {
     user.lastLogin = new Date();
     await user.save();
 
-    let agentData = null;
-    if (user.role === "agent") {
-      agentData = await Agent.findOne({ userId: user._id });
-    }
-
     const accessToken = createAccessToken(user);
     const refreshToken = createRefreshToken(user);
 
@@ -347,7 +250,6 @@ exports.loginWithGoogle = async (req, res) => {
       accessToken,
       expiresIn: 7 * 24 * 60 * 60,
       user: safeUser,
-      ...(agentData && { agentData }),
     });
   } catch (error) {
     console.error("Google login error:", error);
