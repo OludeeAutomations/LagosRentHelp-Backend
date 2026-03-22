@@ -21,8 +21,13 @@ const userSchema = new mongoose.Schema(
     avatar: String,
     role: {
       type: String,
-      enum: ["user", "agent", "admin"],
+      enum: ["user", "admin", "super_admin"],
       default: "user",
+    },
+    googleId: String,
+    tokenVersion: {
+      type: Number,
+      default: 0,
     },
     favorites: [
       {
@@ -58,19 +63,18 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
-    restricted : {
-      type : Boolean,
-      default : false
+    restricted: {
+      type: Boolean,
+      default: false,
     },
     verification: {
       token: { type: String, required: false },
-      expiresAt: { type: Date, required: false }
-    }
-
+      expiresAt: { type: Date, required: false },
+    },
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 userSchema.pre("save", async function (next) {

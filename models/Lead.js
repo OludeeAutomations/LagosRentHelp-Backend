@@ -2,10 +2,10 @@
 const mongoose = require("mongoose");
 
 const leadSchema = new mongoose.Schema({
-  agentId: {
+  ownerId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: "Agent",
-    required: true,
+    ref: "User",
+    required: false,
   },
   userId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -32,6 +32,6 @@ const leadSchema = new mongoose.Schema({
 });
 
 // Add compound index to prevent duplicates
-leadSchema.index({ agentId: 1, userId: 1 }, { unique: true });
+leadSchema.index({ propertyId: 1, userId: 1 }, { unique: true });
 
 module.exports = mongoose.model("Lead", leadSchema);
