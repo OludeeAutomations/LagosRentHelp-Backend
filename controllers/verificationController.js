@@ -1,147 +1,84 @@
-// controllers/verificationController.js
-const dojahService = require("../services/kycService");
-const Agent = require("../models/Agent");
+﻿const dojahService = require("../services/kycService");
+const User = require("../models/User");
 const { validationResult } = require("express-validator");
 
 exports.submitVerification = async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        errors: errors.array(),
-      });
+      return res.status(400).json({ success: false, errors: errors.array() });
     }
 
     const { idType, idNumber, fullName, dateOfBirth } = req.body;
     const selfieImage = req.file;
+
     if (!idType || !idNumber) {
-      return res.status(400).json({
-        success: false,
-        error: "idType and idNumber are required",
-      });
+      return res.status(400).json({ success: false, error: "idType and idNumber are required" });
     }
 
     if ((idType === "nin" || idType === "bvn") && !selfieImage) {
-      return res.status(400).json({
-        success: false,
-        error: "Selfie image is required for NIN and BVN verification",
-      });
-    }
-
-    if (idType === "drivers_license" && (!fullName || !dateOfBirth)) {
-      return res.status(400).json({
-        success: false,
-        error:
-          "Full name and date of birth are required for Driver's License verification",
-      });
+      return res.status(400).json({ success: false, error: "Selfie image is required for NIN and BVN verification" });
     }
 
     let selfieBase64 = null;
     if (selfieImage) {
-      selfieBase64 = `data:${
-        selfieImage.mimetype
-      };base64,${selfieImage.buffer.toString("base64")}`;
+      selfieBase64 = `data:${selfieImage.mimetype};base64,${selfieImage.buffer.toString("base64")}`;
     }
 
-    const additionalData = {
-      fullName,
-      dateOfBirth,
-    };
-
-    const verificationResult = await dojahService.verifyIdentity(
-      idType,
-      idNumber,
-      selfieBase64,
-      additionalData
-    );
+    const additionalData = { fullName, dateOfBirth };
+    const verificationResult = await dojahService.verifyIdentity(idType, idNumber, selfieBase64, additionalData);
 
     if (!verificationResult.success) {
-      return res.status(400).json({
-        success: false,
-        error: verificationResult.error,
-        message: verificationResult.message,
-      });
+      return res.status(400).json({ success: false, error: verificationResult.error, message: verificationResult.message });
     }
 
-    const agentId = req.user.id;
-    const agent = await Agent.findOne({ userId: agentId });
-
-    if (!agent) {
-      return res.status(404).json({
-        success: false,
-        error: "Agent profile not found",
-      });
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ success: false, error: "User not found" });
     }
 
-    agent.verificationStatus = "pending";
-    agent.idType = idType;
-    agent.idNumber = idNumber;
-    agent.verificationData = {
-      dojahResponse: verificationResult.data,
-      submittedAt: new Date(),
-      status: "submitted",
-    };
+    const status = "verified";
+    user.verification = user.verification || {};
+    user.verification.idType = idType;
+    user.verification.idNumber = idNumber;
+    user.verification.status = status;
+    user.verification.verifiedAt = new Date();
+    user.verification.dojahResponse = verificationResult.data;
+    await user.save();
 
-    if (idType === "drivers_license") {
-      agent.verificationData.fullName = fullName;
-      agent.verificationData.dateOfBirth = dateOfBirth;
-    }
-
-    await agent.save();
-
-    return res.status(200).json({
-      success: true,
-      message: "Verification submitted successfully",
-      data: {
-        verificationId:
-          verificationResult.data.entity?.id ||
-          verificationResult.data.request_id,
-        status: "submitted",
-        idType: idType,
-        idNumberMasked: idNumber.replace(/(.{4})$/, "****"),
-      },
-    });
+    return res.status(200).json({ success: true, message: "Identity verified successfully!", data: { status, idType, idNumberMasked: idNumber.replace(/(.{4})$/, "****") } });
   } catch (error) {
     console.error("Verification submission error:", error);
-    return res.status(500).json({
-      success: false,
-      error: "Internal server error",
-      message: "Failed to submit verification",
-    });
+    return res.status(500).json({ success: false, error: "Internal server error", message: "Failed to submit verification" });
   }
 };
 
 exports.checkVerificationStatus = async (req, res) => {
   try {
-    const agentId = req.user.id;
-    const agent = await Agent.findOne({ userId: agentId });
-
-    if (!agent) {
-      return res.status(404).json({
-        success: false,
-        error: "Agent profile not found",
-      });
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ success: false, error: "User not found" });
     }
 
-    return res.status(200).json({
-      success: true,
-      data: {
-        verificationStatus: agent.verificationStatus,
-        idType: agent.idType,
-        submittedAt: agent.verificationData?.submittedAt,
-        dojahStatus: agent.verificationData?.status,
-        idNMaskumber: agent.idNumber
-          ? agent.idNumber.replace(/(.{4})$/, "****")
-          : null,
-      },
-    });
+    return res.status(200).json({ success: true, data: user.verification || {} });
   } catch (error) {
     console.error("Verification status check error:", error);
-    return res.status(500).json({
-      success: false,
-      error: "Internal server error",
-    });
+    return res.status(500).json({ success: false, error: "Internal server error" });
+  }
+};
+
+exports.dojahWebhook = async (req, res) => {
+  try {
+    const webhookSecret = req.headers["x-dojah-secret"];
+    if (webhookSecret !== process.env.DOJAH_WEBHOOK_SECRET) {
+      return res.status(401).json({ success: false, error: "Unauthorized" });
+    }
+
+    // If needed, user matching logic using verification reference (not implemented)
+    return res.status(200).json({ success: true, message: "Webhook received" });
+  } catch (error) {
+    console.error("Webhook processing error:", error);
+    return res.status(500).json({ success: false, error: "Internal server error" });
   }
 };
 exports.dojahWebhook = async (req, res) => {

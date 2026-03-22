@@ -11,9 +11,9 @@ const app = express();
 // Middleware
 app.use(
   cors({
-    origin: ["https://lagosrenthelp.ng"], // only allow your site
+    origin: ["http://localhost:5173", "https://lagosrenthelp.ng"], // only allow your site
     credentials: true, // if you’re using cookies or tokens
-  })
+  }),
 );
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -29,9 +29,6 @@ console.log("✓ User routes loaded: /api/users");
 
 app.use("/api/properties", require("../routes/properties"));
 console.log("✓ Property routes loaded: /api/properties");
-
-app.use("/api/agents", require("../routes/agents"));
-console.log("✓ Agent routes loaded: /api/agents");
 
 app.use("/api/leads", require("../routes/leads"));
 console.log("✓ Lead routes loaded: /api/leads");
@@ -75,7 +72,7 @@ mongoose
     app.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(
-        `📝 API endpoints available at http://localhost:${PORT}/api/`
+        `📝 API endpoints available at http://localhost:${PORT}/api/`,
       );
     });
   })

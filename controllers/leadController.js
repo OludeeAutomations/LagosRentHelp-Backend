@@ -1,49 +1,96 @@
-const Lead = require("../models/Lead");
+﻿const Lead = require("../models/Lead");
 const Property = require("../models/Property");
-const User = require("../models/User");
-const Agent = require("../models/Agent");
-const { sendLeadNotificationEmail } = require("../services/emailService");
 
 exports.createLead = async (req, res) => {
   try {
-    const { agentId, propertyId, type, message } = req.body;
+    const { propertyId, type, message } = req.body;
+    const userId = req.user.id;
+
+    if (!propertyId || !type) {
+      return res.status(400).json({ success: false, error: "propertyId and type are required" });
+    }
+
+    const property = await Property.findById(propertyId);
+    if (!property) {
+      return res.status(404).json({ success: false, error: "Property not found" });
+    }
+
+    const existingLead = await Lead.findOne({ propertyId, userId });
+    if (existingLead) {
+      existingLead.timestamp = new Date();
+      existingLead.message = message || existingLead.message;
+      await existingLead.save();
+      return res.status(200).json({ success: true, data: existingLead, message: "Lead updated" });
+    }
 
     const lead = new Lead({
-      agentId,
-      propertyId: propertyId || null,
+      propertyId,
+      userId,
+      ownerId: property.contactUserId || property.ownerId,
       type,
-      clientId: req.user.id,
-      message,
+      message: message || `${type.toUpperCase()} contact initiated`,
       timestamp: new Date(),
     });
 
     await lead.save();
 
-    // Send email notification to agent
-    const agent = await User.findById(agentId);
-    const agentProfile = await Agent.findOne({ userId: agentId });
-    let property = null;
+    res.status(201).json({ success: true, data: lead });
+  } catch (error) {
+    console.error("Error creating lead:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
 
-    if (propertyId) {
-      property = await Property.findById(propertyId);
+exports.checkLead = async (req, res) => {
+  try {
+    const { propertyId } = req.params;
+    const userId = req.user.id;
+
+    const existingLead = await Lead.findOne({ propertyId, userId });
+
+    res.json({ success: true, hasContacted: !!existingLead, lastContacted: existingLead ? existingLead.timestamp : null });
+  } catch (error) {
+    console.error("Error checking lead:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+exports.getLeads = async (req, res) => {
+  try {
+    const { propertyId, type, status, page = 1, limit = 10 } = req.query;
+    const userId = req.user.id;
+
+    const filter = {};
+
+    if (req.user.role === "user") {
+      filter.userId = userId;
+    } else if (req.user.role === "admin") {
+      filter.ownerId = userId;
     }
 
-    if (agent && agentProfile) {
-      await sendLeadNotificationEmail(
-        { ...agent.toObject(), ...agentProfile.toObject() },
-        lead,
-        property
-      );
-    }
+    if (propertyId) filter.propertyId = propertyId;
+    if (type) filter.type = type;
+    if (status) filter.status = status;
 
-    res.status(201).json({
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+
+    const leads = await Lead.find(filter)
+      .populate("userId", "name email phone avatar")
+      .populate("propertyId", "title location price images type")
+      .sort({ timestamp: -1 })
+      .skip((pageNum - 1) * limitNum)
+      .limit(limitNum);
+
+    const total = await Lead.countDocuments(filter);
+
+    res.json({
       success: true,
-      data: lead,
+      data: leads,
+      pagination: { page: pageNum, limit: limitNum, total, totalPages: Math.ceil(total / limitNum) },
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+    console.error("Error fetching leads:", error);
+    res.status(500).json({ success: false, error: error.message });
   }
 };

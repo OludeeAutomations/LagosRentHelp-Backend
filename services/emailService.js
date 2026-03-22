@@ -1,6 +1,7 @@
 // const { send } = require("@emailjs/nodejs"); // import send directly
 const emailTemplates = require("../utils/emailTemplates");
-const emailjs = require('@emailjs/nodejs');
+const emailjs = require("@emailjs/nodejs");
+const createNotification = require("../services/notificationService");
 
 // Initialize with your keys (optional but recommended)
 emailjs.init({
@@ -33,7 +34,7 @@ const kycTemplates = {
     icon: "✖",
     iconBg: "#DC2626",
     buttonText: "Retry Verification",
-    buttonLink: process.env.FRONTEND_URL + "/agent-signup",
+    buttonLink: process.env.FRONTEND_URL + "/signup",
     buttonBg: "#DC2626",
 
     // ✅ Required template params
@@ -42,10 +43,6 @@ const kycTemplates = {
     email: "", // to be set dynamically when sending
   },
 };
-
-
-
-
 
 const sendEmail = async (emailData) => {
   try {
@@ -61,7 +58,7 @@ const sendEmail = async (emailData) => {
         html: emailData.html || "",
       },
       process.env.EMAILJS_PUBLIC_KEY,
-      process.env.EMAILJS_PRIVATE_KEY
+      process.env.EMAILJS_PRIVATE_KEY,
     );
 
     console.log("Email sent successfully:", response);
@@ -76,14 +73,14 @@ const sendVerificationEmail = async (user) => {
   try {
     const templateParams = {
       FullName: user.name,
-      verificationLink:user.verificationLink,
+      verificationLink: user.verificationLink,
       Email: user.email, // make sure this matches the variable in your EmailJS template
     };
 
     const response = await emailjs.send(
       process.env.EMAILJS_SERVICE_ID,
       process.env.EMAILJS_VERIFICATION_TEMPLATE_ID,
-      templateParams
+      templateParams,
       // publicKey/privateKey are optional here since we initialized globally
     );
 
@@ -97,9 +94,11 @@ const sendVerificationEmail = async (user) => {
 // Wrap templates for easier use
 const sendWelcomeEmail = async (user) => {
   const roleMessage =
-    user.role === 'agent'
-      ? "As an agent, you can now list properties, manage leads, and grow your business."
-      : "As a user, you can browse properties, save favorites, and contact agents directly.";
+    user.role === "admin"
+      ? "As an admin, you have full access to platform management features."
+      : user.role === "super_admin"
+        ? "As a super admin, you can manage admins, approve properties, and oversee the platform."
+      : "As a user, you can browse properties, save favorites, and contact owners directly.";
 
   const templateParams = {
     FullName: user.name,
@@ -107,7 +106,7 @@ const sendWelcomeEmail = async (user) => {
     RoleMessage: roleMessage,
     DashboardLink: `${process.env.FRONTEND_URL}`,
     Year: new Date().getFullYear(),
-    email: user.email, // must match the EmailJS variable if used
+    email: user.email,
   };
 
   try {
@@ -117,19 +116,18 @@ const sendWelcomeEmail = async (user) => {
       templateParams,
     );
 
-    console.log('Email sent successfully!', response);
+    console.log("Email sent successfully!", response);
     return { success: true };
   } catch (error) {
-    console.error('FAILED...', error);
+    console.error("FAILED...", error);
     return { success: false, error: error.message };
   }
 };
 
 const sendResetPasswordEmail = async (user) => {
-
   const templateParams = {
     FullName: user.name,
-    resetLink:user.resetLink,
+    resetLink: user.resetLink,
     Year: new Date().getFullYear(),
     email: user.email, // match your EmailJS template variable for recipient
   };
@@ -138,10 +136,14 @@ const sendResetPasswordEmail = async (user) => {
     const response = await emailjs.send(
       process.env.EMAILJS_SERVICE_ID,
       process.env.EMAILJS_RESET_PASSWORD_TEMPLATE_ID, // your reset template ID
-      templateParams
+      templateParams,
     );
 
-    console.log("✅ Password reset email sent:", response.status, response.text);
+    console.log(
+      "✅ Password reset email sent:",
+      response.status,
+      response.text,
+    );
     return { success: true };
   } catch (error) {
     console.error("❌ Failed to send reset email:", error);
@@ -163,14 +165,26 @@ const sendResetPasswordSuccessEmail = async (user) => {
       templateParams,
     );
 
-    console.log("Password reset success email sent!", response.status, response.text);
+    await createNotification({
+      userId: user._id,
+      type: "system_update",
+      title: "Password Changed",
+      message: "Your account password was changed successfully.",
+      priority: "high",
+      actionRequired: false,
+    });
+
+    console.log(
+      "Password reset success email sent!",
+      response.status,
+      response.text,
+    );
     return { success: true };
   } catch (error) {
     console.error("FAILED to send reset success email...", error);
     return { success: false, error: error.message };
   }
 };
-
 
 const sendKycResponse = async (user, status) => {
   const templateData = kycTemplates[status];
@@ -200,8 +214,18 @@ const sendKycResponse = async (user, status) => {
       process.env.EMAILJS_SERVICE_ID,
       process.env.EMAILJS_KYC_TEMPLATE_ID,
       templateParams,
-      process.env.EMAILJS_PUBLIC_KEY // required for client-side calls
+      process.env.EMAILJS_PUBLIC_KEY, // required for client-side calls
     );
+
+    await createNotification({
+      userId: user._id,
+      type: "system_update",
+      title: notificationTitle,
+      message: notificationMessage,
+      priority: "high",
+      actionRequired: false,
+      link: templateParams.buttonLink || null, // optional: link to KYC page
+    });
 
     console.log("✅ KYC status email sent", response.status, response.text);
     return { success: true };
@@ -211,24 +235,22 @@ const sendKycResponse = async (user, status) => {
   }
 };
 
-
-const sendPropertyListingEmail = async (agent, property) => {
+const sendPropertyListingEmail = async (user, property) => {
   const emailTemplate = emailTemplates.getPropertyListingEmailTemplate(
-    agent,
-    property
+    user,
+    property,
   );
 
   // return await sendEmail({
-  //   to: agent.email,
-  //   toName: agent.name,
+  //   to: user.email,
+  //   toName: user.name,
   //   ...emailTemplate,
   // });
 
-
-   const templateParams = {
-    email: agent.email,
-    message : emailTemplate.text,
-    subject : emailTemplate.subject
+  const templateParams = {
+    email: user.email,
+    message: emailTemplate.text,
+    subject: emailTemplate.subject,
   };
 
   try {
@@ -238,6 +260,16 @@ const sendPropertyListingEmail = async (agent, property) => {
       templateParams,
     );
 
+    await createNotification({
+      userId: user._id,
+      type: "listing_approved",
+      title: "Property Listing Approved",
+      message: `Your property "${property.name || property.title}" has been approved and listed successfully.`,
+      priority: "high",
+      actionRequired: false,
+      link: `/properties/${property._id}`, // optional: link to the property
+    });
+
     console.log("Universal email sent!", response.status, response.text);
     return { success: true };
   } catch (error) {
@@ -246,23 +278,11 @@ const sendPropertyListingEmail = async (agent, property) => {
   }
 };
 
-const sendLeadNotificationEmail = async (agent, lead, property) => {
+const sendLeadNotificationEmail = async (user, lead, property) => {
   const emailTemplate = emailTemplates.getLeadNotificationEmailTemplate(
-    agent,
-    lead,
-    property
-  );
-  return await sendEmail({
-    to: agent.email,
-    toName: agent.name,
-    ...emailTemplate,
-  });
-};
-
-const sendPasswordResetEmail = async (user, resetToken) => {
-  const emailTemplate = emailTemplates.getPasswordResetEmailTemplate(
     user,
-    resetToken
+    lead,
+    property,
   );
   return await sendEmail({
     to: user.email,
@@ -271,7 +291,17 @@ const sendPasswordResetEmail = async (user, resetToken) => {
   });
 };
 
-
+const sendPasswordResetEmail = async (user, resetToken) => {
+  const emailTemplate = emailTemplates.getPasswordResetEmailTemplate(
+    user,
+    resetToken,
+  );
+  return await sendEmail({
+    to: user.email,
+    toName: user.name,
+    ...emailTemplate,
+  });
+};
 
 module.exports = {
   sendEmail,
@@ -282,5 +312,5 @@ module.exports = {
   sendVerificationEmail,
   sendResetPasswordEmail,
   sendResetPasswordSuccessEmail,
-  sendKycResponse
+  sendKycResponse,
 };

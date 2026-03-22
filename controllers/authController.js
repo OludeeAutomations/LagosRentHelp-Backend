@@ -1,9 +1,9 @@
 const User = require("../models/User");
-const Agent = require("../models/Agent");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
-
+const { OAuth2Client } = require("google-auth-library");
+const client = new OAuth2Client(process.env.GOOGLE_OAUTH_CLIENT_ID);
 const {
   sendWelcomeEmail,
   sendVerificationEmail,
@@ -15,7 +15,7 @@ const createAccessToken = (user) => {
   return jwt.sign(
     { userId: user._id, tokenVersion: user.tokenVersion },
     process.env.ACCESS_TOKEN_SECRET,
-    { expiresIn: "15m" }
+    { expiresIn: "15m" },
   );
 };
 
@@ -23,100 +23,16 @@ const createRefreshToken = (user) => {
   return jwt.sign(
     { userId: user._id, tokenVersion: user.tokenVersion },
     process.env.REFRESH_TOKEN_SECRET,
-    { expiresIn: "7d" }
+    { expiresIn: "7d" },
   );
 };
 
 const backEndUrl = process.env.BACKEND_URL;
 const frontEndUrl = process.env.FRONTEND_URL;
-/*exports.register = async (req, res) => {
-  try {
-    const { name, email, phone, password, role, ...agentData } = req.body;
-
-    if (!name || !email || !password || !phone) {
-      return res.status(400).json({
-        success: false,
-        error: "Fill in the required information",
-      });
-    }
-
-    // Check for existing user
-    const existingUser = await User.findOne({ $or: [{ email }, { phone }] });
-    if (existingUser) {
-      return res.status(409).json({
-        success: false,
-        error: "User with this email or phone already exists",
-      });
-    }
-
-    const verificationToken = crypto.randomBytes(16).toString("hex");
-
-    const user = new User({
-      name,
-      email,
-      phone,
-      password,
-      role: role || "user",
-      verification: {
-        token: verificationToken,
-        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
-      },
-      ...agentData,
-    });
-
-    // Generate tokens before saving
-    const verificationUrl = `${frontEndUrl}/verify-email/${user._id}/${verificationToken}`;
-    const accessToken = createAccessToken(user);
-    const refreshToken = createRefreshToken(user);
-
-    // Send verification email FIRST
-    await sendVerificationEmail({
-      verificationLink: verificationUrl,
-      name: user.name,
-      email: user.email,
-    });
-
-    // Only save user if email sent successfully
-    await user.save();
-
-    console.log(verificationUrl);
-
-    res.cookie("refreshToken", refreshToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "strict",
-      path: "/api/auth/refresh",
-    });
-
-    const userResponse = user.toObject();
-    delete userResponse.password;
-    delete userResponse.verification;
-
-    res.status(201).json({
-      success: true,
-      accessToken,
-      user: userResponse,
-    });
-  } catch (error) {
-    console.error("Registration error:", error);
-    if (user && user._id) {
-      try {
-        await User.findByIdAndDelete(user._id);
-        console.log(`Rolled back user creation for: ${user.email}`);
-      } catch (deleteError) {
-        console.error("Failed to rollback user creation:", deleteError);
-      }
-    }
-    res.status(500).json({
-      success: false,
-      error: "Server error, please try again later",
-    });
-  }
-};*/
 
 exports.register = async (req, res) => {
   try {
-    const { name, email, phone, password, role, ...agentData } = req.body;
+    const { name, email, phone, password } = req.body;
 
     if (!name || !email || !password || !phone) {
       return res.status(400).json({
@@ -145,7 +61,7 @@ exports.register = async (req, res) => {
       email,
       phone,
       password,
-      role: role || "user",
+      role: "user",
       verification: {
         token: verificationToken,
         expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes from now
@@ -234,12 +150,6 @@ exports.login = async (req, res) => {
     user.lastLogin = new Date();
     await user.save();
 
-    // Fetch agent info if the user is an agent
-    let agentData = null;
-    if (user.role === "agent") {
-      agentData = await Agent.findOne({ userId: user._id });
-    }
-
     // Generate access and refresh tokens
     const accessToken = createAccessToken(user);
     const refreshToken = createRefreshToken(user);
@@ -264,13 +174,88 @@ exports.login = async (req, res) => {
       accessToken,
       expiresIn: 7 * 24 * 60 * 60,
       user: safeUser,
-      ...(agentData && { agentData }),
     });
   } catch (error) {
     console.error("Login error:", error);
     return res.status(500).json({
       success: false,
       error: error.message || "Internal Server Error",
+    });
+  }
+};
+
+exports.loginWithGoogle = async (req, res) => {
+  try {
+    const { idToken } = req.body;
+
+    if (!idToken) {
+      return res.status(400).json({
+        success: false,
+        error: "Google ID token is required",
+      });
+    }
+
+    const ticket = await client.verifyIdToken({
+      idToken,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+
+    const payload = ticket.getPayload();
+
+    const { email, name, picture: avatar, sub: googleId } = payload;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid Google token",
+      });
+    }
+
+    let user = await User.findOne({ email }).select("+password");
+
+    if (!user) {
+      user = new User({
+        name,
+        email,
+        googleId,
+        avatar,
+        role: "user",
+        emailVerified: true,
+      });
+
+      await user.save();
+    }
+
+    user.lastLogin = new Date();
+    await user.save();
+
+    const accessToken = createAccessToken(user);
+    const refreshToken = createRefreshToken(user);
+
+    // 4. STORE REFRESH TOKEN
+    res.cookie("refreshToken", refreshToken, {
+      httpOnly: true,
+      secure: false, // true in production
+      sameSite: "strict",
+      path: "/api/auth/refresh",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    const safeUser = user.toObject();
+    delete safeUser.password;
+    delete safeUser.verification;
+
+    return res.status(200).json({
+      success: true,
+      accessToken,
+      expiresIn: 7 * 24 * 60 * 60,
+      user: safeUser,
+    });
+  } catch (error) {
+    console.error("Google login error:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Internal Server Error",
     });
   }
 };
@@ -330,6 +315,75 @@ exports.verifyEmail = async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message,
+    });
+  }
+};
+
+// Add this inside authController.js
+
+exports.resendVerificationEmail = async (req, res) => {
+  try {
+    // We accept either userId or email to find the user
+    const { userId, email } = req.body;
+
+    let user;
+
+    if (userId) {
+      user = await User.findById(userId);
+    } else if (email) {
+      user = await User.findOne({ email });
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: "User ID or Email is required",
+      });
+    }
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found",
+      });
+    }
+
+    // 1. Check if already verified
+    if (user.emailVerified) {
+      return res.status(400).json({
+        success: false,
+        error: "This account is already verified. Please login.",
+      });
+    }
+
+    // 2. Generate a NEW verification token
+    const verificationToken = crypto.randomBytes(16).toString("hex");
+
+    // 3. Update the user record
+    user.verification = {
+      token: verificationToken,
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000), // Expires in 10 minutes
+    };
+
+    await user.save();
+
+    // 4. Construct the URL
+    const verificationUrl = `${frontEndUrl}/verify-email/${user._id}/${verificationToken}`;
+
+    // 5. Send the email
+    await sendVerificationEmail({
+      verificationLink: verificationUrl,
+      name: user.name,
+      email: user.email,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Verification link sent successfully. Please check your email.",
+    });
+  } catch (error) {
+    console.error("Resend verification error:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to resend verification email",
     });
   }
 };
@@ -433,6 +487,75 @@ exports.resetPassword = async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+exports.changePassword = async (req, res) => {
+  try {
+    const userId = req.user._id; // from auth middleware
+    const { oldPassword, newPassword, confirmPassword } = req.body;
+
+    // Validate inputs
+    if (!oldPassword || !newPassword || !confirmPassword) {
+      return res.status(400).json({
+        success: false,
+        error: "All fields are required",
+      });
+    }
+
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({
+        success: false,
+        error: "New passwords do not match",
+      });
+    }
+
+    // Find user
+    const user = await User.findById(userId).select("+password");
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found",
+      });
+    }
+
+    // Compare old password
+    const isMatch = await bcrypt.compare(oldPassword, user.password);
+    if (!isMatch) {
+      return res.status(401).json({
+        success: false,
+        error: "Old password is incorrect",
+      });
+    }
+
+    // Prevent using same password
+    const isSamePassword = await bcrypt.compare(newPassword, user.password);
+    if (isSamePassword) {
+      return res.status(400).json({
+        success: false,
+        error: "New password cannot be the same as old password",
+      });
+    }
+
+    // Update password
+    user.password = newPassword;
+
+    // Invalidate all active refresh tokens (logout everywhere)
+    user.tokenVersion += 1;
+
+    await user.save();
+    await sendResetPasswordSuccessEmail(user);
+
+    return res.status(200).json({
+      success: true,
+      message: "Password changed successfully",
+    });
+  } catch (error) {
+    console.error("Change password error:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Something went wrong",
+    });
   }
 };
 

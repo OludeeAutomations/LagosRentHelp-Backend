@@ -27,9 +27,11 @@ const getWelcomeEmailTemplate = (user) => {
               user.role
             }</strong>.</p>
             ${
-              user.role === "agent"
-                ? "<p>As an agent, you can now list properties, manage leads, and grow your business.</p>"
-                : "<p>As a user, you can browse properties, save favorites, and contact agents directly.</p>"
+              user.role === "admin"
+                ? "<p>As an admin, you can now manage listings and platform settings.</p>"
+                : user.role === "super_admin"
+                  ? "<p>As a super admin, you can manage admins, approve properties, and oversee the platform.</p>"
+                : "<p>As a user, you can browse properties, save favorites, and contact owners directly.</p>"
             }
             <p style="text-align: center;">
               <a href="${
@@ -50,18 +52,20 @@ const getWelcomeEmailTemplate = (user) => {
     }!\n\nThank you for joining LagosRentHelp. We're excited to help you find your perfect property.\n\nYour account has been successfully created with the role: ${
       user.role
     }.\n\n${
-      user.role === "agent"
-        ? "As an agent, you can now list properties, manage leads, and grow your business."
-        : "As a user, you can browse properties, save favorites, and contact agents directly."
+      user.role === "admin"
+        ? "As an admin, you can now manage listings and platform settings."
+        : user.role === "super_admin"
+          ? "As a super admin, you can manage admins, approve properties, and oversee the platform."
+          : "As a user, you can browse properties, save favorites, and contact owners directly."
     }\n\nLogin to your dashboard: ${
       process.env.FRONTEND_URL
     }/dashboard\n\nIf you have any questions, please contact our support team.\n\n© ${new Date().getFullYear()} LagosRentHelp. All rights reserved.`,
   };
 };
 
-const getPropertyListingEmailTemplate = (agent, property) => {
+const getPropertyListingEmailTemplate = (user, property) => {
   return {
-    to: agent.email,
+    to: user.email,
     subject: `Your Property Listing is Live: ${property.title}`,
     html: `
      <!DOCTYPE html>
@@ -187,19 +191,19 @@ const getPropertyListingEmailTemplate = (agent, property) => {
 
           <!-- Content -->
           <div class="content">
-            <h2>Hello ${agent.name},</h2>
+            <h2>Hello ${user.name},</h2>
             <p>Your property listing has been successfully published and is now visible to potential buyers or renters.</p>
 
             <div class="property-details">
               <h3>${property.title}</h3>
               <p><strong>Location:</strong> ${property.location}</p>
-              <p><strong>Price:</strong> $${property.price.toLocaleString()}</p>
+              <p><strong>Price:</strong>₦${property.price.toLocaleString()}</p>
               <p><strong>Type:</strong> ${property.type}</p>
               <p><strong>Bedrooms:</strong> ${property.bedrooms}</p>
               <p><strong>Bathrooms:</strong> ${property.bathrooms}</p>
             </div>
 
-            <p>You can view and manage your listing from your agent dashboard.</p>
+            <p>You can view and manage your listing from your dashboard.</p>
             <p>We’ll notify you when someone shows interest in your property.</p>
           </div>
 
@@ -215,7 +219,7 @@ const getPropertyListingEmailTemplate = (agent, property) => {
 
     `,
     text: `Your Property is Now Live!\n\nHello ${
-      agent.name
+      user.name
     },\n\nYour property listing has been successfully published and is now visible to potential buyers/renters.\n\nProperty Details:\n- Title: ${
       property.title
     }\n- Location: ${
@@ -224,13 +228,13 @@ const getPropertyListingEmailTemplate = (agent, property) => {
       property.type
     }\n- Bedrooms: ${property.bedrooms}\n- Bathrooms: ${
       property.bathrooms
-    }\n\nYou can view and manage your listing from your agent dashboard.\n\nWe'll notify you when someone shows interest in your property.\n\nHappy selling!\n\n© ${new Date().getFullYear()} LagosRentHelp. All rights reserved.`,
+    }\n\nYou can view and manage your listing from your dashboard.\n\nWe'll notify you when someone shows interest in your property.\n\nHappy selling!\n\n© ${new Date().getFullYear()} LagosRentHelp. All rights reserved.`,
   };
 };
 
-const getLeadNotificationEmailTemplate = (agent, lead, property) => {
+const getLeadNotificationEmailTemplate = (user, lead, property) => {
   return {
-    to: agent.email,
+    to: user.email,
     subject: `New Lead: Interest in ${
       property ? property.title : "Your Listing"
     }`,
@@ -254,7 +258,7 @@ const getLeadNotificationEmailTemplate = (agent, lead, property) => {
             <h1>New Lead Notification</h1>
           </div>
           <div class="content">
-            <h2>Hello ${agent.name},</h2>
+            <h2>Hello ${user.name},</h2>
             <p>You have a new lead from a potential client interested in your property.</p>
             
             <div class="lead-details">
@@ -266,7 +270,7 @@ const getLeadNotificationEmailTemplate = (agent, lead, property) => {
                 .replace("_", " ")
                 .toUpperCase()}</p>
               <p><strong>Received:</strong> ${new Date(
-                lead.timestamp
+                lead.timestamp,
               ).toLocaleString()}</p>
               ${
                 lead.message
@@ -276,9 +280,9 @@ const getLeadNotificationEmailTemplate = (agent, lead, property) => {
             </div>
             
             <p style="text-align: center;">
-              <a href="${process.env.FRONTEND_URL}/agent/leads/${
-      lead.id
-    }" class="button">View Lead Details</a>
+              <a href="${process.env.FRONTEND_URL}/leads/${
+                lead.id
+              }" class="button">View Lead Details</a>
             </p>
             
             <p>We recommend following up with this lead within 24 hours for best results.</p>
@@ -292,16 +296,16 @@ const getLeadNotificationEmailTemplate = (agent, lead, property) => {
       </html>
     `,
     text: `New Lead Notification\n\nHello ${
-      agent.name
+      user.name
     },\n\nYou have a new lead from a potential client interested in your property.\n\nLead Details:\n- Property: ${
       property ? property.title : "Not specified"
     }\n- Lead Type: ${lead.type
       .replace("_", " ")
       .toUpperCase()}\n- Received: ${new Date(
-      lead.timestamp
+      lead.timestamp,
     ).toLocaleString()}\n${
       lead.message ? `- Message: ${lead.message}\n` : ""
-    }\n\nView lead details: ${process.env.FRONTEND_URL}/agent/leads/${
+    }\n\nView lead details: ${process.env.FRONTEND_URL}/leads/${
       lead.id
     }\n\nWe recommend following up with this lead within 24 hours for best results.\n\nGood luck with your lead!\n\n© ${new Date().getFullYear()} LagosRentHelp. All rights reserved.`,
   };

@@ -12,11 +12,7 @@ const reviewSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
-    agentId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
-    },
+
     rating: {
       type: Number,
       required: true,
@@ -44,7 +40,7 @@ const reviewSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 module.exports = mongoose.model("Review", reviewSchema);
