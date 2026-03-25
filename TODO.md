@@ -1,0 +1,1 @@
+# TODO: Expose updateAgentRolesToAdmin endpoint\n\n## Plan Progress\n\n### [x] Step 1: Create TODO.md ✓\n### [x] Step 2: Edit routes/users.js - Add import + POST route ✓\n### [ ] Step 3: Test endpoint (restart server + API call)\n### [ ] Step 4: Mark complete & cleanup TODO.md

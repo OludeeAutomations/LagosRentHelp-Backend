@@ -90,9 +90,10 @@ exports.listAdminAccounts = async (req, res) => {
   try {
     const { search, role } = req.query;
     const filter = {
-      role: role && ["admin", "super_admin"].includes(role)
-        ? role
-        : { $in: ["admin", "super_admin"] },
+      role:
+        role && ["admin", "super_admin"].includes(role)
+          ? role
+          : { $in: ["admin", "super_admin"] },
     };
 
     if (search) {
@@ -248,8 +249,15 @@ exports.promoteAdminToSuperAdmin = async (req, res) => {
 exports.updateUserProfileByAdmin = async (req, res) => {
   try {
     const { userId } = req.params;
-    const { name, phone, avatar, role, restricted, emailVerified, phoneVerified } =
-      req.body;
+    const {
+      name,
+      phone,
+      avatar,
+      role,
+      restricted,
+      emailVerified,
+      phoneVerified,
+    } = req.body;
 
     const user = await User.findById(userId);
     if (!user) {
@@ -363,6 +371,26 @@ exports.removeFromFavorites = async (req, res) => {
     res.json({
       success: true,
       data: user.favorites,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+};
+
+exports.updateAgentRolesToAdmin = async (req, res) => {
+  try {
+    const result = await User.updateMany(
+      { role: "agent" },
+      { $set: { role: "admin" } },
+    );
+
+    res.json({
+      success: true,
+      message: `Updated ${result.modifiedCount} users from agent to admin role`,
+      data: result,
     });
   } catch (error) {
     res.status(500).json({
