@@ -13,7 +13,7 @@ const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
     folder: "lagos-rent-help/uploads",
-    allowed_formats: ["jpg", "jpeg", "png", "pdf"],
+    allowedFormats: ["jpg", "jpeg", "png", "pdf"],
     transformation: [
       { width: 800, height: 600, crop: "limit" }, // For images
       { quality: "auto" }, // Auto optimize quality
