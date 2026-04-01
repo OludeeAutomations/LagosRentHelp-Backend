@@ -11,7 +11,7 @@ const app = express();
 // Middleware
 app.use(
   cors({
-    origin: ["http://localhost:5173", "https://lagosrenthelp.ng"], // only allow your site
+    origin: ["http://localhost:5173", "https://lagosrenthelp.ng/"], // only allow your site
     credentials: true, // if you’re using cookies or tokens
   }),
 );
@@ -67,8 +67,9 @@ console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
 
 mongoose
   .connect(process.env.MONGODB_URI)
-  .then(() => {
+  .then(async () => {
     console.log("✅ Connected to MongoDB successfully");
+
     app.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(
@@ -78,7 +79,7 @@ mongoose
   })
   .catch((error) => {
     console.error("❌ MongoDB connection error:", error);
-    process.exit(1); // Exit the process if MongoDB connection fails
+    process.exit(1);
   });
 
 // Graceful shutdown handling
