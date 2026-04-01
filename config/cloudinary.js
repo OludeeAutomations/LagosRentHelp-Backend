@@ -1,5 +1,5 @@
 const cloudinary = require("cloudinary").v2;
-const { CloudinaryStorage } = require("multer-storage-cloudinary");
+const CloudinaryStorage = require("multer-storage-cloudinary");
 
 // Configure Cloudinary
 cloudinary.config({
@@ -14,10 +14,6 @@ const storage = new CloudinaryStorage({
   params: {
     folder: "lagos-rent-help/uploads",
     allowedFormats: ["jpg", "jpeg", "png", "pdf"],
-    transformation: [
-      { width: 800, height: 600, crop: "limit" }, // For images
-      { quality: "auto" }, // Auto optimize quality
-    ],
   },
 });
 
