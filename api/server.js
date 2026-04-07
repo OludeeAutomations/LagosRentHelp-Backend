@@ -8,6 +8,21 @@ dotenv.config();
 
 const app = express();
 
+const requiredEnvVars = [
+  "SUPABASE_URL",
+  "SUPABASE_SERVICE_ROLE_KEY",
+  "ACCESS_TOKEN_SECRET",
+  "REFRESH_TOKEN_SECRET",
+];
+
+const missingEnvVars = requiredEnvVars.filter((key) => !process.env[key]);
+
+if (missingEnvVars.length) {
+  throw new Error(
+    `Missing required environment variables: ${missingEnvVars.join(", ")}`,
+  );
+}
+
 const allowedOrigins = [
   "http://localhost:5173",
   "https://lagosrenthelp.ng",
