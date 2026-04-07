@@ -1,4 +1,4 @@
-const Notification = require("../models/Notification");
+const { createNotification: insertNotification } = require("../repositories/notifications");
 
 async function createNotification({
   userId,
@@ -14,7 +14,7 @@ async function createNotification({
       throw new Error("userId, type, title and message are required");
     }
 
-    const notification = await Notification.create({
+    const notification = await insertNotification({
       userId,
       type,
       title,
@@ -23,8 +23,6 @@ async function createNotification({
       priority,
       actionRequired,
     });
-
-    notification.save()
 
     return notification;
   } catch (error) {

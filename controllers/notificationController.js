@@ -1,25 +1,27 @@
-const Notification = require("../models/Notification");
+const {
+  deleteNotification,
+  listNotifications,
+  markNotificationAsRead,
+} = require("../repositories/notifications");
 
 exports.getNotifications = async (req, res) => {
   try {
     const { page = 1, limit = 10 } = req.query;
     const userId = req.user.id;
-
-    const notifications = await Notification.find({ userId })
-      .sort({ createdAt: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
-
-    const total = await Notification.countDocuments({ userId });
+    const { data, total } = await listNotifications({
+      userId,
+      page: Number(page),
+      limit: Number(limit),
+    });
 
     res.json({
       success: true,
-      data: notifications,
+      data,
       pagination: {
         page: Number(page),
         limit: Number(limit),
         total,
-        pages: Math.ceil(total / limit),
+        pages: Math.ceil(total / Number(limit)),
       },
     });
   } catch (error) {
@@ -32,11 +34,10 @@ exports.getNotifications = async (req, res) => {
 
 exports.markAsRead = async (req, res) => {
   try {
-    const notification = await Notification.findByIdAndUpdate(
-      req.params.id,
-      { isRead: true },
-      { new: true },
-    );
+    const notification = await markNotificationAsRead({
+      id: req.params.id,
+      userId: req.user.id,
+    });
 
     res.json({
       success: true,
@@ -52,7 +53,7 @@ exports.markAsRead = async (req, res) => {
 
 exports.deleteNotification = async (req, res) => {
   try {
-    await Notification.findByIdAndDelete(req.params.id);
+    await deleteNotification({ id: req.params.id, userId: req.user.id });
     res.json({
       success: true,
       message: "Notification deleted successfully",

@@ -1,20 +1,7 @@
-const mongoose = require("mongoose");
-const Property = require("../models/Property");
-const User = require("../models/User");
-const { sendPropertyListingEmail } = require("../services/emailService");
 const { cloudinary } = require("../config/cloudinary");
-
-const PROPERTY_POPULATION = [
-  { path: "ownerId", select: "name email phone avatar role" },
-  { path: "contactUserId", select: "name email phone avatar role" },
-  { path: "createdBy", select: "name email phone avatar role" },
-  { path: "approvedBy", select: "name email phone avatar role" },
-];
-
-const applyPopulation = (query) => {
-  PROPERTY_POPULATION.forEach((option) => query.populate(option));
-  return query;
-};
+const { sendPropertyListingEmail } = require("../services/emailService");
+const { findById: findUserById } = require("../repositories/users");
+const propertyRepo = require("../repositories/properties");
 
 const parseAmenities = (amenities, fallback = []) => {
   if (!amenities) return fallback;
@@ -50,19 +37,9 @@ const parseCoordinates = (body) => {
   return null;
 };
 
-const getPublicApprovalFilter = () => ({
-  $or: [{ approvalStatus: "approved" }, { approvalStatus: { $exists: false } }],
-});
-
 const hydrateLegacyPropertyMetadata = (property, userId) => {
-  if (!property.contactUserId) {
-    property.contactUserId = property.ownerId;
-  }
-
-  if (!property.createdBy) {
-    property.createdBy = userId || property.ownerId;
-  }
-
+  if (!property.contactUserId) property.contactUserId = property.ownerId;
+  if (!property.createdBy) property.createdBy = userId || property.ownerId;
   return property;
 };
 
@@ -78,23 +55,8 @@ const isManagedByUser = (property, user) => {
   return createdBy === String(user._id) || contactUserId === String(user._id);
 };
 
-const uploadPropertyImages = async (files = []) => {
-  if (!files.length) return [];
-
-  const uploadResults = await Promise.all(
-    files.map((file) =>
-      cloudinary.uploader.upload(file.path, {
-        folder: "lagos-rent-help/properties",
-        transformation: [
-          { width: 1500, height: 1024, crop: "fill" },
-          { quality: "auto" },
-        ],
-      }),
-    ),
-  );
-
-  return uploadResults.map((result) => result.secure_url);
-};
+const uploadPropertyImages = async (files = []) =>
+  files.map((file) => file.path).filter(Boolean);
 
 exports.createProperty = async (req, res) => {
   try {
@@ -116,14 +78,14 @@ exports.createProperty = async (req, res) => {
     const ownerId =
       req.body.ownerId || req.body.assignedToUserId || req.body.userId;
 
-    if (!ownerId || !mongoose.Types.ObjectId.isValid(ownerId)) {
+    if (!ownerId) {
       return res.status(400).json({
         success: false,
         error: "A valid assigned user is required",
       });
     }
 
-    const assignedUser = await User.findById(ownerId);
+    const assignedUser = await findUserById(ownerId);
     if (!assignedUser) {
       return res.status(404).json({
         success: false,
@@ -131,34 +93,33 @@ exports.createProperty = async (req, res) => {
       });
     }
 
-    const imageUrls = await uploadPropertyImages(req.files);
-    const amenities = parseAmenities(req.body.amenities, []);
     const isSuperAdmin = req.user.role === "super_admin";
-
-    const property = await Property.create({
+    const property = await propertyRepo.createProperty({
       title: req.body.title,
       description: req.body.description,
-      price: req.body.price,
+      price: Number(req.body.price),
       location: req.body.location,
-      totalPackagePrice: req.body.totalPackagePrice,
+      totalPackagePrice: req.body.totalPackagePrice
+        ? Number(req.body.totalPackagePrice)
+        : null,
       type: req.body.type || req.body.propertyType,
       listingType: req.body.listingType,
-      bedrooms: req.body.bedrooms,
-      bathrooms: req.body.bathrooms,
-      area: req.body.area,
-      amenities,
-      images: imageUrls,
+      bedrooms: Number(req.body.bedrooms),
+      bathrooms: Number(req.body.bathrooms),
+      area: Number(req.body.area),
+      amenities: parseAmenities(req.body.amenities, []),
+      images: await uploadPropertyImages(req.files),
       ownerId,
       contactUserId: req.user.id,
       createdBy: req.user.id,
       status: req.body.status || "available",
       approvalStatus: isSuperAdmin ? "approved" : "pending",
-      approvedBy: isSuperAdmin ? req.user.id : undefined,
-      approvedAt: isSuperAdmin ? new Date() : undefined,
+      approvedBy: isSuperAdmin ? req.user.id : null,
+      approvedAt: isSuperAdmin ? new Date() : null,
       approvalNote: req.body.approvalNote,
       coordinates,
       availableFrom: req.body.availableFrom,
-      minimumStay: req.body.minimumStay,
+      minimumStay: req.body.minimumStay ? Number(req.body.minimumStay) : null,
     });
 
     if (isSuperAdmin) {
@@ -167,13 +128,9 @@ exports.createProperty = async (req, res) => {
       );
     }
 
-    const populatedProperty = await applyPopulation(
-      Property.findById(property._id),
-    );
-
     res.status(201).json({
       success: true,
-      data: await populatedProperty,
+      data: property,
       message: isSuperAdmin
         ? "Property uploaded and approved successfully"
         : "Property uploaded successfully and is awaiting approval",
@@ -199,63 +156,53 @@ exports.getProperties = async (req, res) => {
       limit = 10,
     } = req.query;
 
-    const filter = getPublicApprovalFilter();
-
+    let resolvedStatus = "available";
     if (status) {
-      if (Array.isArray(status)) filter.status = { $in: status };
+      if (Array.isArray(status)) resolvedStatus = status;
       else if (typeof status === "string" && status.includes(",")) {
-        filter.status = { $in: status.split(",") };
+        resolvedStatus = status.split(",");
       } else {
-        filter.status = status;
+        resolvedStatus = status;
       }
-    } else {
-      filter.status = "available";
     }
 
-    if (location) filter.location = new RegExp(location, "i");
-    if (type) filter.type = type;
-    if (minPrice || maxPrice) {
-      filter.price = {};
-      if (minPrice) filter.price.$gte = Number(minPrice);
-      if (maxPrice) filter.price.$lte = Number(maxPrice);
-    }
-    if (bedrooms) filter.bedrooms = Number(bedrooms);
-    if (amenities) filter.amenities = { $all: amenities.split(",") };
-
-    let sort = { createdAt: -1 };
+    let sort = { column: "created_at", ascending: false };
     switch (sortBy) {
       case "price_asc":
-        sort = { price: 1 };
+        sort = { column: "price", ascending: true };
         break;
       case "price_desc":
-        sort = { price: -1 };
-        break;
-      case "newest":
-        sort = { createdAt: -1 };
+        sort = { column: "price", ascending: false };
         break;
       case "oldest":
-        sort = { createdAt: 1 };
+        sort = { column: "created_at", ascending: true };
         break;
       case "most_viewed":
-        sort = { views: -1 };
+        sort = { column: "views", ascending: false };
         break;
     }
 
     const pageNum = Number(page);
     const limitNum = Number(limit);
-
-    const properties = await applyPopulation(
-      Property.find(filter)
-        .sort(sort)
-        .skip((pageNum - 1) * limitNum)
-        .limit(limitNum),
-    );
-
-    const total = await Property.countDocuments(filter);
+    const { data, total } = await propertyRepo.listProperties({
+      filters: {
+        publicApprovalOnly: true,
+        status: resolvedStatus,
+        location,
+        type,
+        minPrice: minPrice ? Number(minPrice) : undefined,
+        maxPrice: maxPrice ? Number(maxPrice) : undefined,
+        bedrooms: bedrooms ? Number(bedrooms) : undefined,
+        amenities: amenities ? amenities.split(",") : undefined,
+      },
+      page: pageNum,
+      limit: limitNum,
+      sort,
+    });
 
     res.json({
       success: true,
-      data: await properties,
+      data,
       pagination: {
         page: pageNum,
         limit: limitNum,
@@ -263,7 +210,7 @@ exports.getProperties = async (req, res) => {
         pages: Math.ceil(total / limitNum),
       },
       filters: {
-        status: filter.status,
+        status: resolvedStatus,
         approvalStatus: "approved",
       },
     });
@@ -274,47 +221,28 @@ exports.getProperties = async (req, res) => {
 
 exports.getManagedProperties = async (req, res) => {
   try {
-    const {
-      approvalStatus,
-      status,
-      ownerId,
-      contactUserId,
-      createdBy,
-      page = 1,
-      limit = 20,
-    } = req.query;
-
-    const filter = {};
-
-    if (req.user.role === "admin") {
-      filter.$or = [
-        { createdBy: req.user.id },
-        { contactUserId: req.user.id },
-        { ownerId: req.user.id },
-      ];
+    const filters = {};
+    if (req.user.role === "admin") filters.orManagedByUserId = req.user.id;
+    if (req.query.approvalStatus) filters.approvalStatus = req.query.approvalStatus;
+    if (req.query.status) filters.status = req.query.status;
+    if (req.query.ownerId) filters.ownerId = req.query.ownerId;
+    if (req.query.contactUserId) filters.contactUserId = req.query.contactUserId;
+    if (req.query.createdBy && req.user.role === "super_admin") {
+      filters.createdBy = req.query.createdBy;
     }
 
-    if (approvalStatus) filter.approvalStatus = approvalStatus;
-    if (status) filter.status = status;
-    if (ownerId) filter.ownerId = ownerId;
-    if (contactUserId) filter.contactUserId = contactUserId;
-    if (createdBy && req.user.role === "super_admin") filter.createdBy = createdBy;
-
-    const pageNum = Number(page);
-    const limitNum = Number(limit);
-
-    const properties = await applyPopulation(
-      Property.find(filter)
-        .sort({ createdAt: -1 })
-        .skip((pageNum - 1) * limitNum)
-        .limit(limitNum),
-    );
-
-    const total = await Property.countDocuments(filter);
+    const pageNum = Number(req.query.page || 1);
+    const limitNum = Number(req.query.limit || 20);
+    const { data, total } = await propertyRepo.listProperties({
+      filters,
+      page: pageNum,
+      limit: limitNum,
+      sort: { column: "created_at", ascending: false },
+    });
 
     res.json({
       success: true,
-      data: await properties,
+      data,
       pagination: {
         page: pageNum,
         limit: limitNum,
@@ -329,26 +257,19 @@ exports.getManagedProperties = async (req, res) => {
 
 exports.getPropertyById = async (req, res) => {
   try {
-    const property = await applyPopulation(
-      Property.findById(req.params.id),
-    ).lean();
+    const property = await propertyRepo.findPropertyById(req.params.id);
 
     if (!property) {
       return res.status(404).json({ success: false, error: "Property not found" });
     }
 
-    if (
-      property.approvalStatus &&
-      property.approvalStatus !== "approved"
-    ) {
-      return res
-        .status(404)
-        .json({ success: false, error: "Property not found" });
+    if (property.approvalStatus && property.approvalStatus !== "approved") {
+      return res.status(404).json({ success: false, error: "Property not found" });
     }
 
     const ownerId = String(property.ownerId?._id || property.ownerId);
     if (!req.user || req.user.id !== ownerId) {
-      await Property.findByIdAndUpdate(req.params.id, { $inc: { views: 1 } });
+      await propertyRepo.incrementPropertyViews(req.params.id, (property.views || 0) + 1);
     }
 
     res.json({ success: true, data: property });
@@ -360,16 +281,13 @@ exports.getPropertyById = async (req, res) => {
 
 exports.getManagedPropertyById = async (req, res) => {
   try {
-    const property = await applyPopulation(
-      Property.findById(req.params.id),
-    );
+    const property = await propertyRepo.findPropertyById(req.params.id);
 
     if (!property) {
       return res.status(404).json({ success: false, error: "Property not found" });
     }
 
     hydrateLegacyPropertyMetadata(property, req.user.id);
-
     if (!isManagedByUser(property, req.user)) {
       return res.status(403).json({
         success: false,
@@ -385,15 +303,13 @@ exports.getManagedPropertyById = async (req, res) => {
 
 exports.updateProperty = async (req, res) => {
   try {
-    const { id } = req.params;
-    const property = await Property.findById(id);
+    const property = await propertyRepo.findPropertyById(req.params.id);
 
     if (!property) {
       return res.status(404).json({ success: false, error: "Property not found" });
     }
 
     hydrateLegacyPropertyMetadata(property, req.user.id);
-
     if (!isManagedByUser(property, req.user)) {
       return res.status(403).json({
         success: false,
@@ -401,68 +317,55 @@ exports.updateProperty = async (req, res) => {
       });
     }
 
-    const amenities = parseAmenities(req.body.amenities, property.amenities);
-    const parsedCoordinates = parseCoordinates(req.body);
-
-    let images = property.images || [];
-    if (req.files && req.files.length > 0) {
-      const uploadedImages = await uploadPropertyImages(req.files);
-      images = [...images, ...uploadedImages];
-    }
-
+    let nextOwnerId = String(property.ownerId?._id || property.ownerId);
     if (req.body.ownerId || req.body.assignedToUserId || req.body.userId) {
-      const nextOwnerId =
+      nextOwnerId =
         req.body.ownerId || req.body.assignedToUserId || req.body.userId;
-
-      if (!mongoose.Types.ObjectId.isValid(nextOwnerId)) {
-        return res.status(400).json({
-          success: false,
-          error: "Assigned user is invalid",
-        });
-      }
-
-      const assignedUser = await User.findById(nextOwnerId);
+      const assignedUser = await findUserById(nextOwnerId);
       if (!assignedUser) {
         return res.status(404).json({
           success: false,
           error: "Assigned user not found",
         });
       }
-
-      property.ownerId = nextOwnerId;
     }
 
-    property.title = req.body.title || property.title;
-    property.description = req.body.description || property.description;
-    property.price = req.body.price ? Number(req.body.price) : property.price;
-    property.totalPackagePrice =
-      req.body.totalPackagePrice || property.totalPackagePrice;
-    property.bedrooms = req.body.bedrooms || property.bedrooms;
-    property.bathrooms = req.body.bathrooms || property.bathrooms;
-    property.location = req.body.location || property.location;
-    property.type = req.body.type || property.type;
-    property.listingType = req.body.listingType || property.listingType;
-    property.status = req.body.status || property.status;
-    property.amenities = amenities;
-    property.images = images;
-    property.availableFrom = req.body.availableFrom || property.availableFrom;
-    property.minimumStay = req.body.minimumStay || property.minimumStay;
-
-    if (parsedCoordinates) {
-      property.coordinates = parsedCoordinates;
+    let images = property.images || [];
+    if (req.files?.length) {
+      images = [...images, ...(await uploadPropertyImages(req.files))];
     }
 
-    if (req.user.role === "admin") {
-      property.approvalStatus = "pending";
-      property.approvedBy = undefined;
-      property.approvedAt = undefined;
-    }
-
-    await property.save();
-
-    const populatedProperty = await applyPopulation(
-      Property.findById(property._id),
-    );
+    const updatedProperty = await propertyRepo.updateProperty(req.params.id, {
+      title: req.body.title || property.title,
+      description: req.body.description || property.description,
+      price: req.body.price ? Number(req.body.price) : property.price,
+      totalPackagePrice:
+        req.body.totalPackagePrice !== undefined
+          ? Number(req.body.totalPackagePrice)
+          : property.totalPackagePrice,
+      bedrooms: req.body.bedrooms ? Number(req.body.bedrooms) : property.bedrooms,
+      bathrooms: req.body.bathrooms
+        ? Number(req.body.bathrooms)
+        : property.bathrooms,
+      location: req.body.location || property.location,
+      type: req.body.type || property.type,
+      listingType: req.body.listingType || property.listingType,
+      status: req.body.status || property.status,
+      amenities: parseAmenities(req.body.amenities, property.amenities),
+      images,
+      ownerId: nextOwnerId,
+      availableFrom: req.body.availableFrom || property.availableFrom,
+      minimumStay: req.body.minimumStay
+        ? Number(req.body.minimumStay)
+        : property.minimumStay,
+      coordinates: parseCoordinates(req.body) || property.coordinates,
+      approvalStatus: req.user.role === "admin" ? "pending" : property.approvalStatus,
+      approvedBy:
+        req.user.role === "admin"
+          ? null
+          : property.approvedBy?._id || property.approvedBy,
+      approvedAt: req.user.role === "admin" ? null : property.approvedAt,
+    });
 
     res.json({
       success: true,
@@ -470,7 +373,7 @@ exports.updateProperty = async (req, res) => {
         req.user.role === "super_admin"
           ? "Property updated successfully"
           : "Property updated successfully and sent for re-approval",
-      data: await populatedProperty,
+      data: updatedProperty,
     });
   } catch (error) {
     console.error("Update Property Error:", error);
@@ -480,14 +383,13 @@ exports.updateProperty = async (req, res) => {
 
 exports.deactivateProperty = async (req, res) => {
   try {
-    const property = await Property.findById(req.params.id);
+    const property = await propertyRepo.findPropertyById(req.params.id);
 
     if (!property) {
       return res.status(404).json({ success: false, error: "Property not found" });
     }
 
     hydrateLegacyPropertyMetadata(property, req.user.id);
-
     if (!isManagedByUser(property, req.user)) {
       return res.status(403).json({
         success: false,
@@ -495,13 +397,14 @@ exports.deactivateProperty = async (req, res) => {
       });
     }
 
-    property.status = "rented";
-    await property.save();
+    const updatedProperty = await propertyRepo.updateProperty(req.params.id, {
+      status: "rented",
+    });
 
     res.json({
       success: true,
       message: "Property has been marked as rented",
-      data: property,
+      data: updatedProperty,
     });
   } catch (error) {
     console.error("Deactivate Property Error:", error);
@@ -511,14 +414,13 @@ exports.deactivateProperty = async (req, res) => {
 
 exports.approveProperty = async (req, res) => {
   try {
-    const property = await Property.findById(req.params.id);
+    const property = await propertyRepo.findPropertyById(req.params.id);
 
     if (!property) {
       return res.status(404).json({ success: false, error: "Property not found" });
     }
 
     const approvalStatus = req.body.approvalStatus || "approved";
-
     if (!["approved", "rejected"].includes(approvalStatus)) {
       return res.status(400).json({
         success: false,
@@ -526,16 +428,12 @@ exports.approveProperty = async (req, res) => {
       });
     }
 
-    property.approvalStatus = approvalStatus;
-    property.approvedBy = req.user.id;
-    property.approvedAt = new Date();
-    property.approvalNote = req.body.approvalNote || property.approvalNote;
-
-    await property.save();
-
-    const populatedProperty = await applyPopulation(
-      Property.findById(property._id),
-    );
+    const updatedProperty = await propertyRepo.updateProperty(req.params.id, {
+      approvalStatus,
+      approvedBy: req.user.id,
+      approvedAt: new Date(),
+      approvalNote: req.body.approvalNote || property.approvalNote,
+    });
 
     res.json({
       success: true,
@@ -543,7 +441,7 @@ exports.approveProperty = async (req, res) => {
         approvalStatus === "approved"
           ? "Property approved successfully"
           : "Property rejected successfully",
-      data: await populatedProperty,
+      data: updatedProperty,
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -552,7 +450,7 @@ exports.approveProperty = async (req, res) => {
 
 exports.deleteProperty = async (req, res) => {
   try {
-    const property = await Property.findById(req.params.id);
+    const property = await propertyRepo.findPropertyById(req.params.id);
 
     if (!property) {
       return res.status(404).json({ success: false, error: "Property not found" });
@@ -571,8 +469,7 @@ exports.deleteProperty = async (req, res) => {
       await Promise.all(deletePromises);
     }
 
-    await Property.findByIdAndDelete(req.params.id);
-
+    await propertyRepo.deleteProperty(req.params.id);
     res.json({ success: true, message: "Property deleted successfully" });
   } catch (error) {
     console.error("Delete Property Error:", error);

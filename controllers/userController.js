@@ -1,8 +1,18 @@
-const User = require("../models/User");
-const Property = require("../models/Property");
+const bcrypt = require("bcryptjs");
+const {
+  countPropertiesLinkedToUser,
+  createUser,
+  deleteUser,
+  findByEmailOrPhone,
+  findById,
+  listUsers,
+  updateUser,
+  updateUsersByRole,
+} = require("../repositories/users");
+const { findPropertyById } = require("../repositories/properties");
 
 const sanitizeUser = (user) => {
-  const safeUser = user.toObject ? user.toObject() : { ...user };
+  const safeUser = { ...user };
   delete safeUser.password;
   delete safeUser.verification;
   return safeUser;
@@ -10,7 +20,7 @@ const sanitizeUser = (user) => {
 
 exports.getProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select("-password");
+    const user = await findById(req.user.id);
 
     if (!user) {
       return res.status(404).json({
@@ -21,7 +31,7 @@ exports.getProfile = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      data: user,
+      data: sanitizeUser(user),
     });
   } catch (error) {
     console.error("Error fetching profile:", error);
@@ -35,15 +45,11 @@ exports.getProfile = async (req, res) => {
 exports.updateProfile = async (req, res) => {
   try {
     const { name, phone, avatar } = req.body;
-    const user = await User.findByIdAndUpdate(
-      req.user.id,
-      { name, phone, avatar },
-      { new: true, runValidators: true },
-    ).select("-password");
+    const user = await updateUser(req.user.id, { name, phone, avatar });
 
     res.json({
       success: true,
-      data: user,
+      data: sanitizeUser(user),
     });
   } catch (error) {
     res.status(500).json({
@@ -55,28 +61,14 @@ exports.updateProfile = async (req, res) => {
 
 exports.listManageableUsers = async (req, res) => {
   try {
-    const { role, search } = req.query;
-    const filter = {};
-
-    if (role) {
-      filter.role = role;
-    }
-
-    if (search) {
-      filter.$or = [
-        { name: new RegExp(search, "i") },
-        { email: new RegExp(search, "i") },
-        { phone: new RegExp(search, "i") },
-      ];
-    }
-
-    const users = await User.find(filter)
-      .select("name email phone avatar role emailVerified phoneVerified")
-      .sort({ createdAt: -1 });
+    const users = await listUsers({
+      role: req.query.role,
+      search: req.query.search,
+    });
 
     res.json({
       success: true,
-      data: users,
+      data: users.map(sanitizeUser),
     });
   } catch (error) {
     res.status(500).json({
@@ -88,31 +80,15 @@ exports.listManageableUsers = async (req, res) => {
 
 exports.listAdminAccounts = async (req, res) => {
   try {
-    const { search, role } = req.query;
-    const filter = {
-      role:
-        role && ["admin", "super_admin"].includes(role)
-          ? role
-          : { $in: ["admin", "super_admin"] },
-    };
-
-    if (search) {
-      filter.$or = [
-        { name: new RegExp(search, "i") },
-        { email: new RegExp(search, "i") },
-        { phone: new RegExp(search, "i") },
-      ];
-    }
-
-    const admins = await User.find(filter)
-      .select(
-        "name email phone avatar role emailVerified phoneVerified restricted lastLogin createdAt",
-      )
-      .sort({ createdAt: -1 });
+    const admins = await listUsers({
+      search: req.query.search,
+      role: req.query.role,
+      adminOnly: true,
+    });
 
     res.json({
       success: true,
-      data: admins,
+      data: admins.map(sanitizeUser),
     });
   } catch (error) {
     res.status(500).json({
@@ -133,10 +109,7 @@ exports.createAdminAccount = async (req, res) => {
       });
     }
 
-    const existingUser = await User.findOne({
-      $or: [{ email }, { phone }],
-    });
-
+    const existingUser = await findByEmailOrPhone({ email, phone });
     if (existingUser) {
       return res.status(400).json({
         success: false,
@@ -144,11 +117,11 @@ exports.createAdminAccount = async (req, res) => {
       });
     }
 
-    const admin = await User.create({
+    const admin = await createUser({
       name,
       email,
       phone,
-      password,
+      password: await bcrypt.hash(password, 12),
       role: "admin",
       emailVerified: true,
     });
@@ -169,8 +142,8 @@ exports.createAdminAccount = async (req, res) => {
 exports.deleteAdminAccount = async (req, res) => {
   try {
     const { userId } = req.params;
+    const admin = await findById(userId);
 
-    const admin = await User.findById(userId);
     if (!admin) {
       return res.status(404).json({
         success: false,
@@ -185,10 +158,7 @@ exports.deleteAdminAccount = async (req, res) => {
       });
     }
 
-    const linkedProperties = await Property.countDocuments({
-      $or: [{ contactUserId: admin._id }, { createdBy: admin._id }],
-    });
-
+    const linkedProperties = await countPropertiesLinkedToUser(admin._id);
     if (linkedProperties > 0) {
       return res.status(400).json({
         success: false,
@@ -197,7 +167,7 @@ exports.deleteAdminAccount = async (req, res) => {
       });
     }
 
-    await User.findByIdAndDelete(userId);
+    await deleteUser(userId);
 
     res.json({
       success: true,
@@ -213,8 +183,7 @@ exports.deleteAdminAccount = async (req, res) => {
 
 exports.promoteAdminToSuperAdmin = async (req, res) => {
   try {
-    const { userId } = req.params;
-    const user = await User.findById(userId);
+    const user = await findById(req.params.userId);
 
     if (!user) {
       return res.status(404).json({
@@ -230,13 +199,12 @@ exports.promoteAdminToSuperAdmin = async (req, res) => {
       });
     }
 
-    user.role = "super_admin";
-    await user.save();
+    const updatedUser = await updateUser(user._id, { role: "super_admin" });
 
     res.json({
       success: true,
       message: "Admin upgraded to super admin successfully",
-      data: sanitizeUser(user),
+      data: sanitizeUser(updatedUser),
     });
   } catch (error) {
     res.status(500).json({
@@ -249,6 +217,15 @@ exports.promoteAdminToSuperAdmin = async (req, res) => {
 exports.updateUserProfileByAdmin = async (req, res) => {
   try {
     const { userId } = req.params;
+    const currentUser = await findById(userId);
+
+    if (!currentUser) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found",
+      });
+    }
+
     const {
       name,
       phone,
@@ -258,14 +235,6 @@ exports.updateUserProfileByAdmin = async (req, res) => {
       emailVerified,
       phoneVerified,
     } = req.body;
-
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        error: "User not found",
-      });
-    }
 
     if (role && !["user", "admin", "super_admin"].includes(role)) {
       return res.status(400).json({
@@ -281,20 +250,22 @@ exports.updateUserProfileByAdmin = async (req, res) => {
       });
     }
 
-    if (name !== undefined) user.name = name;
-    if (phone !== undefined) user.phone = phone;
-    if (avatar !== undefined) user.avatar = avatar;
-    if (role !== undefined) user.role = role;
-    if (restricted !== undefined) user.restricted = restricted;
-    if (emailVerified !== undefined) user.emailVerified = emailVerified;
-    if (phoneVerified !== undefined) user.phoneVerified = phoneVerified;
-
-    await user.save();
+    const updatedUser = await updateUser(userId, {
+      name: name !== undefined ? name : currentUser.name,
+      phone: phone !== undefined ? phone : currentUser.phone,
+      avatar: avatar !== undefined ? avatar : currentUser.avatar,
+      role: role !== undefined ? role : currentUser.role,
+      restricted: restricted !== undefined ? restricted : currentUser.restricted,
+      emailVerified:
+        emailVerified !== undefined ? emailVerified : currentUser.emailVerified,
+      phoneVerified:
+        phoneVerified !== undefined ? phoneVerified : currentUser.phoneVerified,
+    });
 
     res.json({
       success: true,
       message: "User profile updated successfully",
-      data: sanitizeUser(user),
+      data: sanitizeUser(updatedUser),
     });
   } catch (error) {
     res.status(500).json({
@@ -306,7 +277,7 @@ exports.updateUserProfileByAdmin = async (req, res) => {
 
 exports.getFavoriteProperties = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).populate("favorites");
+    const user = await findById(req.user.id);
 
     if (!user) {
       return res.status(404).json({
@@ -315,13 +286,15 @@ exports.getFavoriteProperties = async (req, res) => {
       });
     }
 
-    const favoriteProperties = await Property.find({
-      _id: { $in: user.favorites },
-    });
+    const favorites = [];
+    for (const propertyId of user.favorites || []) {
+      const property = await findPropertyById(propertyId);
+      if (property) favorites.push(property);
+    }
 
     res.json({
       success: true,
-      data: favoriteProperties,
+      data: favorites,
     });
   } catch (error) {
     res.status(500).json({
@@ -334,21 +307,34 @@ exports.getFavoriteProperties = async (req, res) => {
 exports.addToFavorites = async (req, res) => {
   try {
     const { propertyId } = req.body;
-    const user = await User.findById(req.user.id);
+    const user = await findById(req.user.id);
 
-    const index = user.favorites.indexOf(propertyId);
-
-    if (index === -1) {
-      user.favorites.push(propertyId);
-    } else {
-      user.favorites.splice(index, 1);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found",
+      });
     }
 
-    await user.save();
+    const property = await findPropertyById(propertyId);
+    if (!property) {
+      return res.status(404).json({
+        success: false,
+        error: "Property not found",
+      });
+    }
+
+    const favorites = [...(user.favorites || [])];
+    const index = favorites.indexOf(propertyId);
+
+    if (index === -1) favorites.push(propertyId);
+    else favorites.splice(index, 1);
+
+    await updateUser(user._id, { favorites });
 
     res.json({
       success: true,
-      data: user.favorites,
+      data: favorites,
     });
   } catch (error) {
     res.status(500).json({
@@ -361,16 +347,21 @@ exports.addToFavorites = async (req, res) => {
 exports.removeFromFavorites = async (req, res) => {
   try {
     const { propertyId } = req.params;
-    const user = await User.findById(req.user.id);
+    const user = await findById(req.user.id);
 
-    user.favorites = user.favorites.filter(
-      (id) => id.toString() !== propertyId,
-    );
-    await user.save();
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found",
+      });
+    }
+
+    const favorites = (user.favorites || []).filter((id) => id !== propertyId);
+    await updateUser(user._id, { favorites });
 
     res.json({
       success: true,
-      data: user.favorites,
+      data: favorites,
     });
   } catch (error) {
     res.status(500).json({
@@ -382,10 +373,7 @@ exports.removeFromFavorites = async (req, res) => {
 
 exports.updateAgentRolesToAdmin = async (req, res) => {
   try {
-    const result = await User.updateMany(
-      { role: "agent" },
-      { $set: { role: "admin" } },
-    );
+    const result = await updateUsersByRole("agent", "admin");
 
     res.json({
       success: true,

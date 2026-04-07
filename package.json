@@ -21,6 +21,7 @@
   "description": "",
   "dependencies": {
     "@emailjs/nodejs": "^5.0.2",
+    "@supabase/supabase-js": "^2.102.1",
     "axios": "^1.12.2",
     "bcryptjs": "^3.0.2",
     "cloudinary": "^2.9.0",
@@ -34,7 +35,6 @@
     "firebase-admin": "^10.3.0",
     "google-auth-library": "^10.5.0",
     "jsonwebtoken": "^9.0.2",
-    "mongoose": "^8.18.0",
     "multer": "^2.0.2",
     "multer-storage-cloudinary": "^2.2.1",
     "nodemailer": "^7.0.6",

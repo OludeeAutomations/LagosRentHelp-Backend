@@ -1,50 +1,31 @@
 const express = require("express");
-const mongoose = require("mongoose");
 const cors = require("cors");
 const dotenv = require("dotenv");
 const cookieParser = require("cookie-parser");
+const supabase = require("../config/supabase");
 
 dotenv.config();
 
 const app = express();
 
-// Middleware
 app.use(
   cors({
-    origin: ["http://localhost:5173", "https://lagosrenthelp.ng/"], // only allow your site
-    credentials: true, // if you’re using cookies or tokens
+    origin: ["http://localhost:5173", "https://lagosrenthelp.ng/"],
+    credentials: true,
   }),
 );
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
-// Routes with console.log to show which routes are being loaded
-console.log("Loading routes...");
 app.use("/api/auth", require("../routes/auth"));
-console.log("✓ Auth routes loaded: /api/auth");
-
 app.use("/api/users", require("../routes/users"));
-console.log("✓ User routes loaded: /api/users");
-
 app.use("/api/properties", require("../routes/properties"));
-console.log("✓ Property routes loaded: /api/properties");
-
 app.use("/api/leads", require("../routes/leads"));
-console.log("✓ Lead routes loaded: /api/leads");
-
 app.use("/api/notifications", require("../routes/notifications"));
-console.log("✓ Notification routes loaded: /api/notifications");
-
 app.use("/api/reviews", require("../routes/reviews"));
-console.log("✓ Review routes loaded: /api/reviews");
-
 app.use("/api/verification", require("../routes/verification"));
-console.log("✓ verification routes loaded: /routes/verification");
 
-console.log("All routes loaded successfully!");
-
-// Error handling middleware
 app.use((err, req, res, next) => {
   console.error("Error:", err.stack);
   res.status(500).json({
@@ -62,31 +43,23 @@ app.use((req, res) => {
 
 const PORT = process.env.PORT || 5000;
 
-console.log(`Starting server on port ${PORT}...`);
-console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
-
-mongoose
-  .connect(process.env.MONGODB_URI)
-  .then(async () => {
-    console.log("✅ Connected to MongoDB successfully");
+supabase
+  .from("users")
+  .select("id", { head: true, count: "exact" })
+  .then(({ error }) => {
+    if (error) throw error;
 
     app.listen(PORT, () => {
-      console.log(`🚀 Server running on port ${PORT}`);
-      console.log(
-        `📝 API endpoints available at http://localhost:${PORT}/api/`,
-      );
+      console.log(`Server running on port ${PORT}`);
+      console.log(`API endpoints available at http://localhost:${PORT}/api/`);
     });
   })
   .catch((error) => {
-    console.error("❌ MongoDB connection error:", error);
+    console.error("Supabase connection error:", error.message);
     process.exit(1);
   });
 
-// Graceful shutdown handling
 process.on("SIGINT", () => {
-  console.log("\n🔻 Shutting down server gracefully...");
-  mongoose.connection.close(() => {
-    console.log("✅ MongoDB connection closed");
-    process.exit(0);
-  });
+  console.log("\nShutting down server gracefully...");
+  process.exit(0);
 });

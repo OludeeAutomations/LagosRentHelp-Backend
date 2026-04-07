@@ -1,9 +1,14 @@
-const User = require("../models/User");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
 const { OAuth2Client } = require("google-auth-library");
-const client = new OAuth2Client(process.env.GOOGLE_OAUTH_CLIENT_ID);
+const {
+  createUser,
+  findByEmail,
+  findByEmailOrPhone,
+  findById,
+  updateUser,
+} = require("../repositories/users");
 const {
   sendWelcomeEmail,
   sendVerificationEmail,
@@ -11,24 +16,30 @@ const {
   sendResetPasswordSuccessEmail,
 } = require("../services/emailService");
 
-const createAccessToken = (user) => {
-  return jwt.sign(
+const client = new OAuth2Client(process.env.GOOGLE_OAUTH_CLIENT_ID);
+
+const createAccessToken = (user) =>
+  jwt.sign(
     { userId: user._id, tokenVersion: user.tokenVersion },
     process.env.ACCESS_TOKEN_SECRET,
     { expiresIn: "15m" },
   );
-};
 
-const createRefreshToken = (user) => {
-  return jwt.sign(
+const createRefreshToken = (user) =>
+  jwt.sign(
     { userId: user._id, tokenVersion: user.tokenVersion },
     process.env.REFRESH_TOKEN_SECRET,
     { expiresIn: "7d" },
   );
-};
 
-const backEndUrl = process.env.BACKEND_URL;
 const frontEndUrl = process.env.FRONTEND_URL;
+
+const sanitizeUser = (user) => {
+  const safeUser = { ...user };
+  delete safeUser.password;
+  delete safeUser.verification;
+  return safeUser;
+};
 
 exports.register = async (req, res) => {
   try {
@@ -41,11 +52,7 @@ exports.register = async (req, res) => {
       });
     }
 
-    // Check if user exists
-    const existingUser = await User.findOne({
-      $or: [{ email }, { phone }],
-    });
-
+    const existingUser = await findByEmailOrPhone({ email, phone });
     if (existingUser) {
       return res.status(400).json({
         success: false,
@@ -53,22 +60,18 @@ exports.register = async (req, res) => {
       });
     }
 
-    const verificationToken = await crypto.randomBytes(16).toString("hex");
-
-    // Create user
-    const user = new User({
+    const verificationToken = crypto.randomBytes(16).toString("hex");
+    const user = await createUser({
       name,
       email,
       phone,
-      password,
+      password: await bcrypt.hash(password, 12),
       role: "user",
       verification: {
         token: verificationToken,
-        expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes from now
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
       },
     });
-
-    // const verificationUrl=`${backEndUrl}/api/auth/verify-email/${user._id}/${verificationToken}`
 
     const verificationUrl = `${frontEndUrl}/verify-email/${user._id}/${verificationToken}`;
     const accessToken = createAccessToken(user);
@@ -79,25 +82,19 @@ exports.register = async (req, res) => {
       name: user.name,
       email: user.email,
     });
-    await user.save();
+
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
       secure: true,
       sameSite: "strict",
       path: "/api/auth/refresh",
     });
-    console.log(verificationUrl);
-    const userResponse = user.toObject();
-    delete userResponse.password;
-    delete userResponse.verification;
 
     res.status(201).json({
       success: true,
-
-      user: userResponse,
-
+      user: sanitizeUser(user),
       accessToken,
-      expiresIn: 7 * 24 * 60 * 60, // 7 days in seconds
+      expiresIn: 7 * 24 * 60 * 60,
     });
   } catch (error) {
     res.status(500).json({
@@ -111,7 +108,6 @@ exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Validate inputs
     if (!email || !password) {
       return res.status(400).json({
         success: false,
@@ -119,16 +115,15 @@ exports.login = async (req, res) => {
       });
     }
 
-    // Find user by email and include password field
-    const user = await User.findOne({ email }).select("+password");
-
+    const user = await findByEmail(email);
     if (!user) {
       return res.status(401).json({
         success: false,
         error: "Invalid credentials",
       });
     }
-    const isMatch = await bcrypt.compare(password, user.password);
+
+    const isMatch = await bcrypt.compare(password, user.password || "");
     if (!isMatch) {
       return res.status(401).json({
         success: false,
@@ -136,9 +131,6 @@ exports.login = async (req, res) => {
       });
     }
 
-    // Compare passwords manually
-
-    // Check if user email is verified
     if (user.emailVerified === false) {
       return res.status(403).json({
         success: false,
@@ -146,34 +138,23 @@ exports.login = async (req, res) => {
       });
     }
 
-    // Update last login timestamp
-    user.lastLogin = new Date();
-    await user.save();
+    const updatedUser = await updateUser(user._id, { lastLogin: new Date() });
+    const accessToken = createAccessToken(updatedUser);
+    const refreshToken = createRefreshToken(updatedUser);
 
-    // Generate access and refresh tokens
-    const accessToken = createAccessToken(user);
-    const refreshToken = createRefreshToken(user);
-
-    // Store refresh token in a secure HTTP-only cookie
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
-      secure: false, // ⚠️ set to false if testing locally (localhost)
+      secure: false,
       sameSite: "strict",
       path: "/api/auth/refresh",
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
-    // Prepare safe user response
-    const safeUser = user.toObject();
-    delete safeUser.password;
-    delete safeUser.verification;
-
-    // Send final success response
     return res.status(200).json({
       success: true,
       accessToken,
       expiresIn: 7 * 24 * 60 * 60,
-      user: safeUser,
+      user: sanitizeUser(updatedUser),
     });
   } catch (error) {
     console.error("Login error:", error);
@@ -201,7 +182,6 @@ exports.loginWithGoogle = async (req, res) => {
     });
 
     const payload = ticket.getPayload();
-
     const { email, name, picture: avatar, sub: googleId } = payload;
 
     if (!email) {
@@ -211,10 +191,10 @@ exports.loginWithGoogle = async (req, res) => {
       });
     }
 
-    let user = await User.findOne({ email }).select("+password");
+    let user = await findByEmail(email);
 
     if (!user) {
-      user = new User({
+      user = await createUser({
         name,
         email,
         googleId,
@@ -222,34 +202,26 @@ exports.loginWithGoogle = async (req, res) => {
         role: "user",
         emailVerified: true,
       });
-
-      await user.save();
     }
 
-    user.lastLogin = new Date();
-    await user.save();
+    user = await updateUser(user._id, { lastLogin: new Date() });
 
     const accessToken = createAccessToken(user);
     const refreshToken = createRefreshToken(user);
 
-    // 4. STORE REFRESH TOKEN
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
-      secure: false, // true in production
+      secure: false,
       sameSite: "strict",
       path: "/api/auth/refresh",
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
-    const safeUser = user.toObject();
-    delete safeUser.password;
-    delete safeUser.verification;
-
     return res.status(200).json({
       success: true,
       accessToken,
       expiresIn: 7 * 24 * 60 * 60,
-      user: safeUser,
+      user: sanitizeUser(user),
     });
   } catch (error) {
     console.error("Google login error:", error);
@@ -262,10 +234,9 @@ exports.loginWithGoogle = async (req, res) => {
 
 exports.verifyEmail = async (req, res) => {
   try {
-    const { userId, token } = req.params; // use params, not body
+    const { userId, token } = req.params;
+    const user = await findById(userId);
 
-    //  Find the user
-    const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -273,7 +244,6 @@ exports.verifyEmail = async (req, res) => {
       });
     }
 
-    // Check if already verified
     if (user.emailVerified) {
       return res.status(409).json({
         success: false,
@@ -281,11 +251,10 @@ exports.verifyEmail = async (req, res) => {
       });
     }
 
-    //Validate token
     if (
       !user.verification ||
-      user.verification.token != token ||
-      user.verification.expiresAt < Date.now()
+      user.verification.token !== token ||
+      new Date(user.verification.expiresAt).getTime() < Date.now()
     ) {
       return res.status(400).json({
         success: false,
@@ -293,12 +262,11 @@ exports.verifyEmail = async (req, res) => {
       });
     }
 
-    //  Mark verified
-    user.emailVerified = true;
-    user.verification = undefined; // clear token
-    await user.save();
+    await updateUser(user._id, {
+      emailVerified: true,
+      verification: null,
+    });
 
-    //  Send welcome email
     await sendWelcomeEmail({
       id: user._id,
       name: user.name,
@@ -319,20 +287,14 @@ exports.verifyEmail = async (req, res) => {
   }
 };
 
-// Add this inside authController.js
-
 exports.resendVerificationEmail = async (req, res) => {
   try {
-    // We accept either userId or email to find the user
     const { userId, email } = req.body;
 
     let user;
-
-    if (userId) {
-      user = await User.findById(userId);
-    } else if (email) {
-      user = await User.findOne({ email });
-    } else {
+    if (userId) user = await findById(userId);
+    else if (email) user = await findByEmail(email);
+    else {
       return res.status(400).json({
         success: false,
         error: "User ID or Email is required",
@@ -346,7 +308,6 @@ exports.resendVerificationEmail = async (req, res) => {
       });
     }
 
-    // 1. Check if already verified
     if (user.emailVerified) {
       return res.status(400).json({
         success: false,
@@ -354,21 +315,15 @@ exports.resendVerificationEmail = async (req, res) => {
       });
     }
 
-    // 2. Generate a NEW verification token
     const verificationToken = crypto.randomBytes(16).toString("hex");
-
-    // 3. Update the user record
-    user.verification = {
+    const verification = {
       token: verificationToken,
-      expiresAt: new Date(Date.now() + 10 * 60 * 1000), // Expires in 10 minutes
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
     };
 
-    await user.save();
+    await updateUser(user._id, { verification });
 
-    // 4. Construct the URL
     const verificationUrl = `${frontEndUrl}/verify-email/${user._id}/${verificationToken}`;
-
-    // 5. Send the email
     await sendVerificationEmail({
       verificationLink: verificationUrl,
       name: user.name,
@@ -391,8 +346,8 @@ exports.resendVerificationEmail = async (req, res) => {
 exports.requestPasswordReset = async (req, res) => {
   try {
     const { email } = req.body;
+    const user = await findByEmail(email);
 
-    const user = await User.findOne({ email });
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -400,13 +355,14 @@ exports.requestPasswordReset = async (req, res) => {
       });
     }
 
-    // Generate reset token
     const resetToken = crypto.randomBytes(16).toString("hex");
+    const verification = {
+      ...(user.verification || {}),
+      token: resetToken,
+      expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+    };
 
-    user.verification.token = resetToken;
-    user.verification.expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
-
-    await user.save();
+    await updateUser(user._id, { verification });
 
     const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${user._id}/${resetToken}`;
 
@@ -425,7 +381,6 @@ exports.requestPasswordReset = async (req, res) => {
   }
 };
 
-// Reset Password
 exports.resetPassword = async (req, res) => {
   try {
     const { userId, token, password, confirmPassword } = req.body;
@@ -437,13 +392,6 @@ exports.resetPassword = async (req, res) => {
       });
     }
 
-    if (!password || !confirmPassword) {
-      return res.status(400).json({
-        success: false,
-        error: "Password and confirm password are required",
-      });
-    }
-
     if (password !== confirmPassword) {
       return res.status(400).json({
         success: false,
@@ -451,30 +399,29 @@ exports.resetPassword = async (req, res) => {
       });
     }
 
-    const user = await User.findById(userId);
+    const user = await findById(userId);
     if (!user) {
       return res.status(404).json({ success: false, error: "User not found" });
     }
 
-    // Check if token matches & not expired
     if (
       !user.verification?.token ||
       user.verification.token !== token ||
-      user.verification.expiresAt < Date.now()
+      new Date(user.verification.expiresAt).getTime() < Date.now()
     ) {
       return res
         .status(400)
         .json({ success: false, error: "Invalid or expired token" });
     }
 
-    // Hash and update password
-    user.password = password;
+    const verification = { ...(user.verification || {}) };
+    delete verification.token;
+    delete verification.expiresAt;
 
-    // Clear verification token
-    user.verification.token = undefined;
-    user.verification.expiresAt = undefined;
-
-    await user.save();
+    await updateUser(user._id, {
+      password: await bcrypt.hash(password, 12),
+      verification,
+    });
 
     sendResetPasswordSuccessEmail({
       email: user.email,
@@ -492,10 +439,9 @@ exports.resetPassword = async (req, res) => {
 
 exports.changePassword = async (req, res) => {
   try {
-    const userId = req.user._id; // from auth middleware
+    const userId = req.user._id;
     const { oldPassword, newPassword, confirmPassword } = req.body;
 
-    // Validate inputs
     if (!oldPassword || !newPassword || !confirmPassword) {
       return res.status(400).json({
         success: false,
@@ -510,8 +456,7 @@ exports.changePassword = async (req, res) => {
       });
     }
 
-    // Find user
-    const user = await User.findById(userId).select("+password");
+    const user = await findById(userId);
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -519,8 +464,7 @@ exports.changePassword = async (req, res) => {
       });
     }
 
-    // Compare old password
-    const isMatch = await bcrypt.compare(oldPassword, user.password);
+    const isMatch = await bcrypt.compare(oldPassword, user.password || "");
     if (!isMatch) {
       return res.status(401).json({
         success: false,
@@ -528,8 +472,7 @@ exports.changePassword = async (req, res) => {
       });
     }
 
-    // Prevent using same password
-    const isSamePassword = await bcrypt.compare(newPassword, user.password);
+    const isSamePassword = await bcrypt.compare(newPassword, user.password || "");
     if (isSamePassword) {
       return res.status(400).json({
         success: false,
@@ -537,13 +480,11 @@ exports.changePassword = async (req, res) => {
       });
     }
 
-    // Update password
-    user.password = newPassword;
+    await updateUser(user._id, {
+      password: await bcrypt.hash(newPassword, 12),
+      tokenVersion: (user.tokenVersion || 0) + 1,
+    });
 
-    // Invalidate all active refresh tokens (logout everywhere)
-    user.tokenVersion += 1;
-
-    await user.save();
     await sendResetPasswordSuccessEmail(user);
 
     return res.status(200).json({
@@ -565,14 +506,12 @@ exports.refresh = async (req, res) => {
 
   try {
     const decoded = jwt.verify(token, process.env.REFRESH_TOKEN_SECRET);
-    const user = await User.findById(decoded.userId);
+    const user = await findById(decoded.userId);
 
-    // ✅ check if user exists
     if (!user) return res.status(403).json({ message: "User not found" });
-
-    // ✅ check if token version is still valid
-    if (user.tokenVersion !== decoded.tokenVersion)
+    if (user.tokenVersion !== decoded.tokenVersion) {
       return res.status(403).json({ message: "Token invalidated" });
+    }
 
     const accessToken = createAccessToken(user);
     res.json({ accessToken });
@@ -581,7 +520,6 @@ exports.refresh = async (req, res) => {
   }
 };
 
-// Logout
 exports.logout = (req, res) => {
   res.clearCookie("refreshToken", { path: "/api/auth/refresh" });
   res.json({ message: "Logged out" });
@@ -589,31 +527,20 @@ exports.logout = (req, res) => {
 
 exports.validateToken = async (req, res) => {
   try {
-    console.log("🔍 Validating token for user:", req.user?._id);
-
-    // Check if user exists in database
-    const currentUser = await User.findById(req.user._id);
+    const currentUser = await findById(req.user._id);
 
     if (!currentUser) {
-      console.log("❌ User not found in database");
       return res.status(401).json({
         success: false,
         error: "User not found",
       });
     }
 
-    console.log("✅ User found:", currentUser.email);
-
-    // Return fresh user data
-    const safeUser = currentUser.toObject();
-    delete safeUser.password;
-
     res.json({
       success: true,
-      user: safeUser,
+      user: sanitizeUser(currentUser),
     });
   } catch (error) {
-    console.log("❌ Validation error:", error.message);
     res.status(401).json({
       success: false,
       error: "Invalid token",
