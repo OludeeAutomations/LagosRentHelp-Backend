@@ -2,15 +2,15 @@ require("dotenv").config();
 const { createClient } = require("@supabase/supabase-js");
 
 const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseServiceRoleKey = process.env.SUPABASE_PUBLISHABLE_DEFAULT_KEY;
+const supabasePublishableKey = process.env.SUPABASE_PUBLISHABLE_DEFAULT_KEY;
 
-if (!supabaseUrl || !supabaseServiceRoleKey) {
+if (!supabaseUrl || !supabasePublishableKey) {
   console.warn(
-    "Supabase environment variables are missing. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.",
+    "Supabase environment variables are missing. Set SUPABASE_URL and SUPABASE_PUBLISHABLE_DEFAULT_KEY.",
   );
 }
 
-const supabase = createClient(supabaseUrl || "", supabaseServiceRoleKey || "", {
+const supabase = createClient(supabaseUrl || "", supabasePublishableKey || "", {
   auth: {
     autoRefreshToken: false,
     persistSession: false,
