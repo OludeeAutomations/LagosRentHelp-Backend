@@ -10,7 +10,11 @@ const app = express();
 
 app.use(
   cors({
-    origin: ["http://localhost:5173", "https://lagosrenthelp.ng/"],
+    origin: [
+      "http://localhost:5173",
+      "https://lagosrenthelp.ng/",
+      "https://lagosrenthelp.onrender.com/",
+    ],
     credentials: true,
   }),
 );
