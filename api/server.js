@@ -15,6 +15,10 @@ const requiredEnvVars = [
   "REFRESH_TOKEN_SECRET",
 ];
 
+console.log("=== DEBUG ENV CHECK ===");
+requiredEnvVars.forEach((key) =>
+  console.log(`${key}: ${process.env[key] ? "SET" : "MISSING"}`),
+);
 const missingEnvVars = requiredEnvVars.filter((key) => !process.env[key]);
 
 if (missingEnvVars.length) {
@@ -28,21 +32,21 @@ const allowedOrigins = [
   "https://lagosrenthelp.ng",
   "https://lagosrenthelp.onrender.com",
 ];
+// TEMP DEBUG: Loosened CORS
 
 const corsOptions = {
-  origin(origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-
-    return callback(new Error(`CORS blocked for origin: ${origin}`));
-  },
+  origin: true, // TEMP DEBUG: Allow all origins to test if origin check blocking
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
 };
 
+console.log("Applying CORS middleware...");
 app.use(cors(corsOptions));
+console.log(
+  "CORS middleware applied. Allowed origin:",
+  typeof corsOptions.origin === "boolean" ? "ALL (debug)" : "specific list",
+);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
@@ -72,19 +76,22 @@ app.use((req, res) => {
 
 const PORT = process.env.PORT || 5000;
 
+console.log("Testing Supabase connection...");
 supabase
   .from("users")
   .select("id", { head: true, count: "exact" })
-  .then(({ error }) => {
+  .then(({ error, count }) => {
     if (error) throw error;
+    console.log("Supabase connected successfully. Users count:", count);
 
+    console.log("Starting server on port", PORT, "...");
     app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
+      console.log(`✅ Server running on port ${PORT}`);
       console.log(`API endpoints available at http://localhost:${PORT}/api/`);
     });
   })
   .catch((error) => {
-    console.error("Supabase connection error:", error.message);
+    console.error("❌ Supabase connection error:", error.message);
     process.exit(1);
   });
 

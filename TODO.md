@@ -1,1 +1,12 @@
-# TODO: Expose updateAgentRolesToAdmin endpoint\n\n## Plan Progress\n\n### [x] Step 1: Create TODO.md ✓\n### [x] Step 2: Edit routes/users.js - Add import + POST route ✓\n### [ ] Step 3: Test endpoint (restart server + API call)\n### [ ] Step 4: Mark complete & cleanup TODO.md
+# Task: Fix CORS Error on /api/properties
+
+## Steps:
+
+- [x] Create TODO.md with plan breakdown
+- [x] Edit api/server.js: Loosen CORS to origin: true + add debug logging
+- [x] Test changes locally (npm run dev)
+- [ ] Commit & push changes (git add . && git commit -m "fix: loosen CORS + add logging for debug" && git push)
+- [ ] Check Render deployment logs for startup success/error
+- [ ] Test frontend API call
+- [ ] Tighten CORS if working (add backend logging endpoint if needed)
+- [ ] attempt_completion
