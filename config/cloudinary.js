@@ -10,7 +10,7 @@ cloudinary.config({
 
 // Create storage engine for Multer
 const storage = new CloudinaryStorage({
-  cloudinary: cloudinary,
+  cloudinary: require("cloudinary"),
   params: {
     folder: "lagos-rent-help/uploads",
     allowedFormats: ["jpg", "jpeg", "png", "pdf"],
