@@ -2,6 +2,7 @@ const { cloudinary } = require("../config/cloudinary");
 const { sendPropertyListingEmail } = require("../services/emailService");
 const { findById: findUserById } = require("../repositories/users");
 const propertyRepo = require("../repositories/properties");
+const { uploadPropertyImages } = require("../utils/uploadToCloudinary");
 
 const parseAmenities = (amenities, fallback = []) => {
   if (!amenities) return fallback;
@@ -54,9 +55,6 @@ const isManagedByUser = (property, user) => {
 
   return createdBy === String(user._id) || contactUserId === String(user._id);
 };
-
-const uploadPropertyImages = async (files = []) =>
-  files.map((file) => file.path).filter(Boolean);
 
 exports.createProperty = async (req, res) => {
   try {
@@ -223,10 +221,12 @@ exports.getManagedProperties = async (req, res) => {
   try {
     const filters = {};
     if (req.user.role === "admin") filters.orManagedByUserId = req.user.id;
-    if (req.query.approvalStatus) filters.approvalStatus = req.query.approvalStatus;
+    if (req.query.approvalStatus)
+      filters.approvalStatus = req.query.approvalStatus;
     if (req.query.status) filters.status = req.query.status;
     if (req.query.ownerId) filters.ownerId = req.query.ownerId;
-    if (req.query.contactUserId) filters.contactUserId = req.query.contactUserId;
+    if (req.query.contactUserId)
+      filters.contactUserId = req.query.contactUserId;
     if (req.query.createdBy && req.user.role === "super_admin") {
       filters.createdBy = req.query.createdBy;
     }
@@ -260,16 +260,23 @@ exports.getPropertyById = async (req, res) => {
     const property = await propertyRepo.findPropertyById(req.params.id);
 
     if (!property) {
-      return res.status(404).json({ success: false, error: "Property not found" });
+      return res
+        .status(404)
+        .json({ success: false, error: "Property not found" });
     }
 
     if (property.approvalStatus && property.approvalStatus !== "approved") {
-      return res.status(404).json({ success: false, error: "Property not found" });
+      return res
+        .status(404)
+        .json({ success: false, error: "Property not found" });
     }
 
     const ownerId = String(property.ownerId?._id || property.ownerId);
     if (!req.user || req.user.id !== ownerId) {
-      await propertyRepo.incrementPropertyViews(req.params.id, (property.views || 0) + 1);
+      await propertyRepo.incrementPropertyViews(
+        req.params.id,
+        (property.views || 0) + 1,
+      );
     }
 
     res.json({ success: true, data: property });
@@ -284,7 +291,9 @@ exports.getManagedPropertyById = async (req, res) => {
     const property = await propertyRepo.findPropertyById(req.params.id);
 
     if (!property) {
-      return res.status(404).json({ success: false, error: "Property not found" });
+      return res
+        .status(404)
+        .json({ success: false, error: "Property not found" });
     }
 
     hydrateLegacyPropertyMetadata(property, req.user.id);
@@ -306,7 +315,9 @@ exports.updateProperty = async (req, res) => {
     const property = await propertyRepo.findPropertyById(req.params.id);
 
     if (!property) {
-      return res.status(404).json({ success: false, error: "Property not found" });
+      return res
+        .status(404)
+        .json({ success: false, error: "Property not found" });
     }
 
     hydrateLegacyPropertyMetadata(property, req.user.id);
@@ -343,7 +354,9 @@ exports.updateProperty = async (req, res) => {
         req.body.totalPackagePrice !== undefined
           ? Number(req.body.totalPackagePrice)
           : property.totalPackagePrice,
-      bedrooms: req.body.bedrooms ? Number(req.body.bedrooms) : property.bedrooms,
+      bedrooms: req.body.bedrooms
+        ? Number(req.body.bedrooms)
+        : property.bedrooms,
       bathrooms: req.body.bathrooms
         ? Number(req.body.bathrooms)
         : property.bathrooms,
@@ -359,7 +372,8 @@ exports.updateProperty = async (req, res) => {
         ? Number(req.body.minimumStay)
         : property.minimumStay,
       coordinates: parseCoordinates(req.body) || property.coordinates,
-      approvalStatus: req.user.role === "admin" ? "pending" : property.approvalStatus,
+      approvalStatus:
+        req.user.role === "admin" ? "pending" : property.approvalStatus,
       approvedBy:
         req.user.role === "admin"
           ? null
@@ -386,7 +400,9 @@ exports.deactivateProperty = async (req, res) => {
     const property = await propertyRepo.findPropertyById(req.params.id);
 
     if (!property) {
-      return res.status(404).json({ success: false, error: "Property not found" });
+      return res
+        .status(404)
+        .json({ success: false, error: "Property not found" });
     }
 
     hydrateLegacyPropertyMetadata(property, req.user.id);
@@ -417,7 +433,9 @@ exports.approveProperty = async (req, res) => {
     const property = await propertyRepo.findPropertyById(req.params.id);
 
     if (!property) {
-      return res.status(404).json({ success: false, error: "Property not found" });
+      return res
+        .status(404)
+        .json({ success: false, error: "Property not found" });
     }
 
     const approvalStatus = req.body.approvalStatus || "approved";
@@ -453,16 +471,14 @@ exports.deleteProperty = async (req, res) => {
     const property = await propertyRepo.findPropertyById(req.params.id);
 
     if (!property) {
-      return res.status(404).json({ success: false, error: "Property not found" });
+      return res
+        .status(404)
+        .json({ success: false, error: "Property not found" });
     }
 
     if (property.images?.length) {
       const deletePromises = property.images.map((imageUrl) => {
-        const publicId = imageUrl
-          .split("/")
-          .slice(-2)
-          .join("/")
-          .split(".")[0];
+        const publicId = imageUrl.split("/").slice(-2).join("/").split(".")[0];
         return cloudinary.uploader.destroy(publicId);
       });
 

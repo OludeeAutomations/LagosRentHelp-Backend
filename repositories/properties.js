@@ -94,7 +94,9 @@ const createProperty = async (payload) =>
 
 const findPropertyById = async (id) =>
   mapProperty(
-    await maybeSingle(supabase.from("properties").select(PROPERTY_SELECT).eq("id", id)),
+    await maybeSingle(
+      supabase.from("properties").select(PROPERTY_SELECT).eq("id", id),
+    ),
   );
 
 const listProperties = async ({
@@ -112,18 +114,26 @@ const listProperties = async ({
   }
 
   if (filters.status) {
-    if (Array.isArray(filters.status)) query = query.in("status", filters.status);
+    if (Array.isArray(filters.status))
+      query = query.in("status", filters.status);
     else query = query.eq("status", filters.status);
   }
-  if (filters.location) query = query.ilike("location", `%${filters.location}%`);
+  if (filters.location)
+    query = query.ilike("location", `%${filters.location}%`);
   if (filters.type) query = query.eq("type", filters.type);
-  if (filters.minPrice !== undefined) query = query.gte("price", filters.minPrice);
-  if (filters.maxPrice !== undefined) query = query.lte("price", filters.maxPrice);
-  if (filters.bedrooms !== undefined) query = query.eq("bedrooms", filters.bedrooms);
-  if (filters.amenities?.length) query = query.contains("amenities", filters.amenities);
-  if (filters.approvalStatus) query = query.eq("approval_status", filters.approvalStatus);
+  if (filters.minPrice !== undefined)
+    query = query.gte("price", filters.minPrice);
+  if (filters.maxPrice !== undefined)
+    query = query.lte("price", filters.maxPrice);
+  if (filters.bedrooms !== undefined)
+    query = query.eq("bedrooms", filters.bedrooms);
+  if (filters.amenities?.length)
+    query = query.contains("amenities", filters.amenities);
+  if (filters.approvalStatus)
+    query = query.eq("approval_status", filters.approvalStatus);
   if (filters.ownerId) query = query.eq("owner_id", filters.ownerId);
-  if (filters.contactUserId) query = query.eq("contact_user_id", filters.contactUserId);
+  if (filters.contactUserId)
+    query = query.eq("contact_user_id", filters.contactUserId);
   if (filters.createdBy) query = query.eq("created_by", filters.createdBy);
   if (filters.orManagedByUserId) {
     const userId = filters.orManagedByUserId;
@@ -165,10 +175,12 @@ const updateProperty = async (id, changes) => {
   if ("amenities" in changes) payload.amenities = changes.amenities;
   if ("images" in changes) payload.images = changes.images;
   if ("ownerId" in changes) payload.owner_id = changes.ownerId;
-  if ("contactUserId" in changes) payload.contact_user_id = changes.contactUserId;
+  if ("contactUserId" in changes)
+    payload.contact_user_id = changes.contactUserId;
   if ("createdBy" in changes) payload.created_by = changes.createdBy;
   if ("status" in changes) payload.status = changes.status;
-  if ("approvalStatus" in changes) payload.approval_status = changes.approvalStatus;
+  if ("approvalStatus" in changes)
+    payload.approval_status = changes.approvalStatus;
   if ("approvedBy" in changes) payload.approved_by = changes.approvedBy;
   if ("approvedAt" in changes) payload.approved_at = changes.approvedAt;
   if ("approvalNote" in changes) payload.approval_note = changes.approvalNote;
@@ -177,12 +189,17 @@ const updateProperty = async (id, changes) => {
   if ("rating" in changes) payload.rating = changes.rating;
   if ("reviewCount" in changes) payload.review_count = changes.reviewCount;
   if ("coordinates" in changes) payload.coordinates = changes.coordinates;
-  if ("availableFrom" in changes) payload.available_from = changes.availableFrom;
+  if ("availableFrom" in changes)
+    payload.available_from = changes.availableFrom;
   if ("minimumStay" in changes) payload.minimum_stay = changes.minimumStay;
 
   return mapProperty(
     await single(
-      supabase.from("properties").update(payload).eq("id", id).select(PROPERTY_SELECT),
+      supabase
+        .from("properties")
+        .update(payload)
+        .eq("id", id)
+        .select(PROPERTY_SELECT),
     ),
   );
 };
