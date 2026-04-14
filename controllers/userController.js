@@ -10,13 +10,7 @@ const {
   updateUsersByRole,
 } = require("../repositories/users");
 const { findPropertyById } = require("../repositories/properties");
-
-const sanitizeUser = (user) => {
-  const safeUser = { ...user };
-  delete safeUser.password;
-  delete safeUser.verification;
-  return safeUser;
-};
+const { serializeUser } = require("../utils/serializeUser");
 
 exports.getProfile = async (req, res) => {
   try {
@@ -31,7 +25,7 @@ exports.getProfile = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      data: sanitizeUser(user),
+      data: serializeUser(user),
     });
   } catch (error) {
     console.error("Error fetching profile:", error);
@@ -49,7 +43,7 @@ exports.updateProfile = async (req, res) => {
 
     res.json({
       success: true,
-      data: sanitizeUser(user),
+      data: serializeUser(user),
     });
   } catch (error) {
     res.status(500).json({
@@ -68,7 +62,7 @@ exports.listManageableUsers = async (req, res) => {
 
     res.json({
       success: true,
-      data: users.map(sanitizeUser),
+      data: users.map(serializeUser),
     });
   } catch (error) {
     res.status(500).json({
@@ -88,7 +82,7 @@ exports.listAdminAccounts = async (req, res) => {
 
     res.json({
       success: true,
-      data: admins.map(sanitizeUser),
+      data: admins.map(serializeUser),
     });
   } catch (error) {
     res.status(500).json({
@@ -100,7 +94,7 @@ exports.listAdminAccounts = async (req, res) => {
 
 exports.createAdminAccount = async (req, res) => {
   try {
-    const { name, email, phone, password } = req.body;
+    const { name, email, phone, password, avatar } = req.body;
 
     if (!name || !email || !phone || !password) {
       return res.status(400).json({
@@ -122,6 +116,7 @@ exports.createAdminAccount = async (req, res) => {
       email,
       phone,
       password: await bcrypt.hash(password, 12),
+      avatar,
       role: "admin",
       emailVerified: true,
     });
@@ -129,7 +124,7 @@ exports.createAdminAccount = async (req, res) => {
     res.status(201).json({
       success: true,
       message: "Admin account created successfully",
-      data: sanitizeUser(admin),
+      data: serializeUser(admin),
     });
   } catch (error) {
     res.status(500).json({
@@ -204,7 +199,7 @@ exports.promoteAdminToSuperAdmin = async (req, res) => {
     res.json({
       success: true,
       message: "Admin upgraded to super admin successfully",
-      data: sanitizeUser(updatedUser),
+      data: serializeUser(updatedUser),
     });
   } catch (error) {
     res.status(500).json({
@@ -255,7 +250,8 @@ exports.updateUserProfileByAdmin = async (req, res) => {
       phone: phone !== undefined ? phone : currentUser.phone,
       avatar: avatar !== undefined ? avatar : currentUser.avatar,
       role: role !== undefined ? role : currentUser.role,
-      restricted: restricted !== undefined ? restricted : currentUser.restricted,
+      restricted:
+        restricted !== undefined ? restricted : currentUser.restricted,
       emailVerified:
         emailVerified !== undefined ? emailVerified : currentUser.emailVerified,
       phoneVerified:
@@ -265,7 +261,7 @@ exports.updateUserProfileByAdmin = async (req, res) => {
     res.json({
       success: true,
       message: "User profile updated successfully",
-      data: sanitizeUser(updatedUser),
+      data: serializeUser(updatedUser),
     });
   } catch (error) {
     res.status(500).json({

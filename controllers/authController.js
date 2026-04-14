@@ -15,6 +15,7 @@ const {
   sendResetPasswordEmail,
   sendResetPasswordSuccessEmail,
 } = require("../services/emailService");
+const { serializeUser } = require("../utils/serializeUser");
 
 const client = new OAuth2Client(process.env.GOOGLE_OAUTH_CLIENT_ID);
 
@@ -33,13 +34,6 @@ const createRefreshToken = (user) =>
   );
 
 const frontEndUrl = process.env.FRONTEND_URL;
-
-const sanitizeUser = (user) => {
-  const safeUser = { ...user };
-  delete safeUser.password;
-  delete safeUser.verification;
-  return safeUser;
-};
 
 exports.register = async (req, res) => {
   try {
@@ -92,7 +86,7 @@ exports.register = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      user: sanitizeUser(user),
+      user: serializeUser(user),
       accessToken,
       expiresIn: 7 * 24 * 60 * 60,
     });
@@ -154,7 +148,7 @@ exports.login = async (req, res) => {
       success: true,
       accessToken,
       expiresIn: 7 * 24 * 60 * 60,
-      user: sanitizeUser(updatedUser),
+      user: serializeUser(updatedUser),
     });
   } catch (error) {
     console.error("Login error:", error);
@@ -221,7 +215,7 @@ exports.loginWithGoogle = async (req, res) => {
       success: true,
       accessToken,
       expiresIn: 7 * 24 * 60 * 60,
-      user: sanitizeUser(user),
+      user: serializeUser(user),
     });
   } catch (error) {
     console.error("Google login error:", error);
@@ -538,7 +532,7 @@ exports.validateToken = async (req, res) => {
 
     res.json({
       success: true,
-      user: sanitizeUser(currentUser),
+      user: serializeUser(currentUser),
     });
   } catch (error) {
     res.status(401).json({

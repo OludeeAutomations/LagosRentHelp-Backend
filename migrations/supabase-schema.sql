@@ -57,7 +57,7 @@ create table if not exists public.properties (
   likes integer not null default 0,
   rating numeric not null default 0,
   review_count integer not null default 0,
-  coordinates jsonb,
+  -- coordinates jsonb,
   available_from timestamptz,
   minimum_stay integer,
   created_at timestamptz not null default timezone('utc', now()),

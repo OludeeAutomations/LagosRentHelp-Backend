@@ -1,3 +1,5 @@
+const { getDisplayAvatar } = require("../services/userAvatarService");
+
 const normalizeIdFields = (record) => {
   if (!record || typeof record !== "object") return record;
 
@@ -19,6 +21,7 @@ const mapUser = (row) => {
     email: row.email,
     phone: row.phone,
     avatar: row.avatar,
+    displayAvatar: getDisplayAvatar(row),
     role: row.role,
     googleId: row.google_id,
     tokenVersion: row.token_version ?? 0,
@@ -44,6 +47,7 @@ const mapRelatedUser = (row) => {
     email: row.email,
     phone: row.phone,
     avatar: row.avatar,
+    displayAvatar: getDisplayAvatar(row),
     role: row.role,
   });
 };
@@ -79,7 +83,7 @@ const mapProperty = (row) => {
     likes: row.likes ?? 0,
     rating: row.rating ?? 0,
     reviewCount: row.review_count ?? 0,
-    coordinates: row.coordinates || null,
+    // coordinates: row.coordinates || null,
     availableFrom: row.available_from,
     minimumStay: row.minimum_stay,
     createdAt: row.created_at,

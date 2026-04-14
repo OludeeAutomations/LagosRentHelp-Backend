@@ -15,7 +15,7 @@ const REVIEW_SELECT = `
   report_count,
   created_at,
   updated_at,
-  user:users!reviews_user_id_fkey(id,name,avatar)
+  user:users!reviews_user_id_fkey(id,name,avatar,role)
 `;
 
 const single = async (query) => {

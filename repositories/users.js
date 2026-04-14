@@ -1,5 +1,9 @@
 const crypto = require("crypto");
 const supabase = require("../config/supabase");
+const {
+  applyAvatarPolicyToCreate,
+  applyAvatarPolicyToUpdate,
+} = require("../services/userAvatarService");
 const { mapUser } = require("../utils/dbMappers");
 
 const USER_SELECT = `
@@ -63,26 +67,27 @@ const findByEmailOrPhone = async ({ email, phone }) => {
 };
 
 const createUser = async (payload) => {
+  const nextPayload = applyAvatarPolicyToCreate(payload);
   const row = await single(
     supabase
       .from("users")
       .insert({
-        id: payload.id || buildId(),
-        name: payload.name,
-        email: payload.email.toLowerCase(),
-        phone: payload.phone || null,
-        avatar: payload.avatar || null,
-        role: payload.role || "user",
-        google_id: payload.googleId || null,
-        token_version: payload.tokenVersion ?? 0,
-        favorites: payload.favorites || [],
-        search_history: payload.searchHistory || [],
-        email_verified: payload.emailVerified ?? false,
-        phone_verified: payload.phoneVerified ?? false,
-        last_login: payload.lastLogin || null,
-        password: payload.password || null,
-        restricted: payload.restricted ?? false,
-        verification: payload.verification || {},
+        id: nextPayload.id || buildId(),
+        name: nextPayload.name,
+        email: nextPayload.email.toLowerCase(),
+        phone: nextPayload.phone || null,
+        avatar: nextPayload.avatar || null,
+        role: nextPayload.role || "user",
+        google_id: nextPayload.googleId || null,
+        token_version: nextPayload.tokenVersion ?? 0,
+        favorites: nextPayload.favorites || [],
+        search_history: nextPayload.searchHistory || [],
+        email_verified: nextPayload.emailVerified ?? false,
+        phone_verified: nextPayload.phoneVerified ?? false,
+        last_login: nextPayload.lastLogin || null,
+        password: nextPayload.password || null,
+        restricted: nextPayload.restricted ?? false,
+        verification: nextPayload.verification || {},
       })
       .select(USER_SELECT),
   );
@@ -91,23 +96,37 @@ const createUser = async (payload) => {
 };
 
 const updateUser = async (id, changes) => {
+  const currentUser = await findById(id);
+  const nextChanges = applyAvatarPolicyToUpdate(currentUser, changes);
   const payload = {};
 
-  if ("name" in changes) payload.name = changes.name;
-  if ("email" in changes && changes.email) payload.email = changes.email.toLowerCase();
-  if ("phone" in changes) payload.phone = changes.phone;
-  if ("avatar" in changes) payload.avatar = changes.avatar;
-  if ("role" in changes) payload.role = changes.role;
-  if ("googleId" in changes) payload.google_id = changes.googleId;
-  if ("tokenVersion" in changes) payload.token_version = changes.tokenVersion;
-  if ("favorites" in changes) payload.favorites = changes.favorites;
-  if ("searchHistory" in changes) payload.search_history = changes.searchHistory;
-  if ("emailVerified" in changes) payload.email_verified = changes.emailVerified;
-  if ("phoneVerified" in changes) payload.phone_verified = changes.phoneVerified;
-  if ("lastLogin" in changes) payload.last_login = changes.lastLogin;
-  if ("password" in changes) payload.password = changes.password;
-  if ("restricted" in changes) payload.restricted = changes.restricted;
-  if ("verification" in changes) payload.verification = changes.verification;
+  if ("name" in nextChanges) payload.name = nextChanges.name;
+  if ("email" in nextChanges && nextChanges.email) {
+    payload.email = nextChanges.email.toLowerCase();
+  }
+  if ("phone" in nextChanges) payload.phone = nextChanges.phone;
+  if ("avatar" in nextChanges) payload.avatar = nextChanges.avatar;
+  if ("role" in nextChanges) payload.role = nextChanges.role;
+  if ("googleId" in nextChanges) payload.google_id = nextChanges.googleId;
+  if ("tokenVersion" in nextChanges) {
+    payload.token_version = nextChanges.tokenVersion;
+  }
+  if ("favorites" in nextChanges) payload.favorites = nextChanges.favorites;
+  if ("searchHistory" in nextChanges) {
+    payload.search_history = nextChanges.searchHistory;
+  }
+  if ("emailVerified" in nextChanges) {
+    payload.email_verified = nextChanges.emailVerified;
+  }
+  if ("phoneVerified" in nextChanges) {
+    payload.phone_verified = nextChanges.phoneVerified;
+  }
+  if ("lastLogin" in nextChanges) payload.last_login = nextChanges.lastLogin;
+  if ("password" in nextChanges) payload.password = nextChanges.password;
+  if ("restricted" in nextChanges) payload.restricted = nextChanges.restricted;
+  if ("verification" in nextChanges) {
+    payload.verification = nextChanges.verification;
+  }
 
   const row = await single(
     supabase.from("users").update(payload).eq("id", id).select(USER_SELECT),

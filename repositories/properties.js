@@ -84,7 +84,7 @@ const createProperty = async (payload) =>
           likes: payload.likes ?? 0,
           rating: payload.rating ?? 0,
           review_count: payload.reviewCount ?? 0,
-          coordinates: payload.coordinates || null,
+          // coordinates: payload.coordinates || null,
           available_from: payload.availableFrom || null,
           minimum_stay: payload.minimumStay || null,
         })
@@ -188,7 +188,7 @@ const updateProperty = async (id, changes) => {
   if ("likes" in changes) payload.likes = changes.likes;
   if ("rating" in changes) payload.rating = changes.rating;
   if ("reviewCount" in changes) payload.review_count = changes.reviewCount;
-  if ("coordinates" in changes) payload.coordinates = changes.coordinates;
+  //if ("coordinates" in changes) payload.coordinates = changes.coordinates;
   if ("availableFrom" in changes)
     payload.available_from = changes.availableFrom;
   if ("minimumStay" in changes) payload.minimum_stay = changes.minimumStay;
