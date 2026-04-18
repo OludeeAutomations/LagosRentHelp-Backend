@@ -11,32 +11,6 @@ const parseAmenities = (amenities, fallback = []) => {
   return fallback;
 };
 
-// const parseCoordinates = (body) => {
-//   const rawCoordinates = body.coordinates || body.locationCoordinates;
-
-//   if (rawCoordinates) {
-//     const parsed =
-//       typeof rawCoordinates === "string"
-//         ? JSON.parse(rawCoordinates)
-//         : rawCoordinates;
-
-//     const lat = Number(parsed.lat ?? parsed.latitude);
-//     const lng = Number(parsed.lng ?? parsed.longitude);
-
-//     if (Number.isFinite(lat) && Number.isFinite(lng)) {
-//       return { lat, lng };
-//     }
-//   }
-
-//   const lat = Number(body.lat ?? body.latitude);
-//   const lng = Number(body.lng ?? body.longitude);
-
-//   if (Number.isFinite(lat) && Number.isFinite(lng)) {
-//     return { lat, lng };
-//   }
-
-//   return null;
-// };
 
 const hydrateLegacyPropertyMetadata = (property, userId) => {
   if (!property.contactUserId) property.contactUserId = property.ownerId;
@@ -65,13 +39,6 @@ exports.createProperty = async (req, res) => {
       });
     }
 
-    // const coordinates = parseCoordinates(req.body);
-    // if (!coordinates) {
-    //   return res.status(400).json({
-    //     success: false,
-    //     error: "Valid property coordinates are required",
-    //   });
-    // }
 
     const ownerId =
       req.body.ownerId || req.body.assignedToUserId || req.body.userId;
@@ -115,7 +82,6 @@ exports.createProperty = async (req, res) => {
       approvedBy: isSuperAdmin ? req.user.id : null,
       approvedAt: isSuperAdmin ? new Date() : null,
       approvalNote: req.body.approvalNote,
-      // coordinates,
       availableFrom: req.body.availableFrom,
       minimumStay: req.body.minimumStay ? Number(req.body.minimumStay) : null,
     });
@@ -371,7 +337,6 @@ exports.updateProperty = async (req, res) => {
       minimumStay: req.body.minimumStay
         ? Number(req.body.minimumStay)
         : property.minimumStay,
-      // coordinates: parseCoordinates(req.body) || property.coordinates,
       approvalStatus:
         req.user.role === "admin" ? "pending" : property.approvalStatus,
       approvedBy:
