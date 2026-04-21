@@ -65,13 +65,9 @@ exports.createProperty = async (req, res) => {
       });
     }
 
-    // const coordinates = parseCoordinates(req.body);
-    // if (!coordinates) {
-    //   return res.status(400).json({
-    //     success: false,
-    //     error: "Valid property coordinates are required",
-    //   });
-    // }
+    const coordinates = req.body.coordinates
+      ? JSON.parse(req.body.coordinates)
+      : null;
 
     const ownerId =
       req.body.ownerId || req.body.assignedToUserId || req.body.userId;
@@ -115,7 +111,7 @@ exports.createProperty = async (req, res) => {
       approvedBy: isSuperAdmin ? req.user.id : null,
       approvedAt: isSuperAdmin ? new Date() : null,
       approvalNote: req.body.approvalNote,
-      // coordinates,
+      coordinates,
       availableFrom: req.body.availableFrom,
       minimumStay: req.body.minimumStay ? Number(req.body.minimumStay) : null,
     });
@@ -371,7 +367,9 @@ exports.updateProperty = async (req, res) => {
       minimumStay: req.body.minimumStay
         ? Number(req.body.minimumStay)
         : property.minimumStay,
-      // coordinates: parseCoordinates(req.body) || property.coordinates,
+      coordinates: req.body.coordinates
+        ? JSON.parse(req.body.coordinates)
+        : property.coordinates,
       approvalStatus:
         req.user.role === "admin" ? "pending" : property.approvalStatus,
       approvedBy:
