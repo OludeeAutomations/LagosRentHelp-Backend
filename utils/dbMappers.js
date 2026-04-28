@@ -83,6 +83,7 @@ const mapProperty = (row) => {
     likes: row.likes ?? 0,
     rating: row.rating ?? 0,
     reviewCount: row.review_count ?? 0,
+    coordinates: row.coordinates || null,
     availableFrom: row.available_from,
     minimumStay: row.minimum_stay,
     createdAt: row.created_at,

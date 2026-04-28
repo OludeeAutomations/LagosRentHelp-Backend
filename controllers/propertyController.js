@@ -11,7 +11,6 @@ const parseAmenities = (amenities, fallback = []) => {
   return fallback;
 };
 
-
 const hydrateLegacyPropertyMetadata = (property, userId) => {
   if (!property.contactUserId) property.contactUserId = property.ownerId;
   if (!property.createdBy) property.createdBy = userId || property.ownerId;
@@ -39,6 +38,9 @@ exports.createProperty = async (req, res) => {
       });
     }
 
+    const coordinates = req.body.coordinates
+      ? JSON.parse(req.body.coordinates)
+      : null;
 
     const ownerId =
       req.body.ownerId || req.body.assignedToUserId || req.body.userId;
@@ -82,6 +84,7 @@ exports.createProperty = async (req, res) => {
       approvedBy: isSuperAdmin ? req.user.id : null,
       approvedAt: isSuperAdmin ? new Date() : null,
       approvalNote: req.body.approvalNote,
+      coordinates,
       availableFrom: req.body.availableFrom,
       minimumStay: req.body.minimumStay ? Number(req.body.minimumStay) : null,
     });
@@ -337,6 +340,9 @@ exports.updateProperty = async (req, res) => {
       minimumStay: req.body.minimumStay
         ? Number(req.body.minimumStay)
         : property.minimumStay,
+      coordinates: req.body.coordinates
+        ? JSON.parse(req.body.coordinates)
+        : property.coordinates,
       approvalStatus:
         req.user.role === "admin" ? "pending" : property.approvalStatus,
       approvedBy:
