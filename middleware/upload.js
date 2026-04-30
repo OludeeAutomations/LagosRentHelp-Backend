@@ -1,10 +1,9 @@
 // middleware/upload.js
 const multer = require("multer");
-const { storage } = require("../config/cloudinary");
 
-// Create Multer instance
+// Use memory storage so file.buffer is available for streamifier → Cloudinary
 const upload = multer({
-  storage: storage,
+  storage: multer.memoryStorage(),
   limits: {
     fileSize: 5 * 1024 * 1024, // 5MB limit
   },
