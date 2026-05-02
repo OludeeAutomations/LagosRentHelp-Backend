@@ -28,6 +28,7 @@ const PROPERTY_SELECT = `
   likes,
   rating,
   review_count,
+  coordinates,
   available_from,
   minimum_stay,
   created_at,
