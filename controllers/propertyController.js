@@ -11,6 +11,19 @@ const parseAmenities = (amenities, fallback = []) => {
   return fallback;
 };
 
+const parseJsonField = (value) => {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch (error) {
+      return null;
+    }
+  }
+  if (typeof value === "object") return value;
+  return null;
+};
+
 const hydrateLegacyPropertyMetadata = (property, userId) => {
   if (!property.contactUserId) property.contactUserId = property.ownerId;
   if (!property.createdBy) property.createdBy = userId || property.ownerId;
@@ -38,9 +51,7 @@ exports.createProperty = async (req, res) => {
       });
     }
 
-    const coordinates = req.body.coordinates
-      ? JSON.parse(req.body.coordinates)
-      : null;
+    const coordinates = parseJsonField(req.body.coordinates);
 
     const ownerId =
       req.body.ownerId || req.body.assignedToUserId || req.body.userId;
@@ -341,7 +352,7 @@ exports.updateProperty = async (req, res) => {
         ? Number(req.body.minimumStay)
         : property.minimumStay,
       coordinates: req.body.coordinates
-        ? JSON.parse(req.body.coordinates)
+        ? parseJsonField(req.body.coordinates)
         : property.coordinates,
       approvalStatus:
         req.user.role === "admin" ? "pending" : property.approvalStatus,
